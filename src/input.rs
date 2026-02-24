@@ -494,6 +494,18 @@ impl App {
     pub(crate) fn handle_mouse(&mut self, event: MouseEvent) {
         match event.kind {
             MouseEventKind::Down(MouseButton::Left) => {
+                // Check if clicking on the divider between panels
+                let divider_x = self.last_right_panel_area.x;
+                if divider_x > 0
+                    && event.column >= divider_x.saturating_sub(1)
+                    && event.column <= divider_x + 1
+                    && event.row >= self.last_right_panel_area.y
+                    && event.row < self.last_right_panel_area.y + self.last_right_panel_area.height
+                {
+                    self.dragging_divider = true;
+                    return;
+                }
+
                 // Clear any existing selection on new click
                 self.selection = None;
 
@@ -571,6 +583,15 @@ impl App {
                 }
             }
             MouseEventKind::Drag(MouseButton::Left) => {
+                // Handle divider dragging
+                if self.dragging_divider {
+                    let total_width =
+                        self.last_sessions_area.width + self.last_right_panel_area.width;
+                    let min_width: u16 = 15;
+                    let max_width = total_width / 2;
+                    self.left_panel_width = event.column.clamp(min_width, max_width);
+                    return;
+                }
                 // Update selection end point, clamped to inner rect bounds
                 if self.selection.is_some() {
                     let inner = self.last_right_panel_inner;
@@ -585,6 +606,9 @@ impl App {
                         }
                     }
                 }
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                self.dragging_divider = false;
             }
             MouseEventKind::ScrollUp => {
                 self.selection = None;

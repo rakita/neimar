@@ -8,6 +8,7 @@ use ratatui::widgets::ListState;
 use std::collections::HashMap;
 use std::io::{Read as _, Seek, SeekFrom, Write};
 use std::path::PathBuf;
+use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
@@ -97,6 +98,8 @@ pub(crate) struct App {
     pub(crate) selected_cli_type: CliType,
     pub(crate) selection: Option<Selection>,
     pub(crate) last_right_panel_inner: Rect,
+    pub(crate) left_panel_width: u16,
+    pub(crate) dragging_divider: bool,
 }
 
 impl App {
@@ -129,6 +132,8 @@ impl App {
             selected_cli_type: CliType::Claude,
             selection: None,
             last_right_panel_inner: Rect::default(),
+            left_panel_width: 28,
+            dragging_divider: false,
         }
     }
 
@@ -235,6 +240,9 @@ impl App {
                     ralph_created_at: None,
                     permission_mode: PermissionMode::Unknown,
                     transcript_mtime: None,
+                    summary: None,
+                    last_summary_hash: 0,
+                    summary_pending: false,
                 };
                 session
                     .parser
@@ -282,6 +290,9 @@ impl App {
                     ralph_created_at: None,
                     permission_mode: PermissionMode::Unknown,
                     transcript_mtime: None,
+                    summary: None,
+                    last_summary_hash: 0,
+                    summary_pending: false,
                 };
                 session
                     .parser
@@ -339,6 +350,9 @@ impl App {
             ralph_created_at: None,
             permission_mode: PermissionMode::Unknown,
             transcript_mtime: None,
+            summary: None,
+            last_summary_hash: 0,
+            summary_pending: false,
         };
 
         self.sessions.push(session);
@@ -465,6 +479,63 @@ impl App {
                     break;
                 }
             }
+        }
+
+        self.poll_summaries();
+    }
+
+    // ── Summary polling ─────────────────────────────────
+
+    pub(crate) fn poll_summaries(&mut self) {
+        for session in &mut self.sessions {
+            if session.archived
+                || session.status != SessionStatus::Running
+                || session.summary_pending
+            {
+                continue;
+            }
+
+            let lines = session.last_output_lines(10);
+            if lines.is_empty() {
+                continue;
+            }
+
+            let text = lines.join("\n");
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            text.hash(&mut hasher);
+            let hash = hasher.finish();
+
+            if hash == session.last_summary_hash {
+                continue;
+            }
+
+            session.last_summary_hash = hash;
+            session.summary_pending = true;
+
+            let id = session.id;
+            let tx = self.event_tx.clone();
+            tokio::spawn(async move {
+                let result = tokio::process::Command::new("claude")
+                    .arg("-p")
+                    .arg(format!(
+                        "Summarize in max 5 words what this coding session is doing. \
+                         Output ONLY the summary, no quotes, no punctuation at the end. \
+                         Here is the recent output:\n\n{}",
+                        text
+                    ))
+                    .arg("--model")
+                    .arg("haiku")
+                    .output()
+                    .await;
+
+                let summary = match result {
+                    Ok(output) if output.status.success() => {
+                        String::from_utf8_lossy(&output.stdout).trim().to_string()
+                    }
+                    _ => String::new(),
+                };
+                let _ = tx.send(AppEvent::SummaryResult(id, summary));
+            });
         }
     }
 

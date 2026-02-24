@@ -7,8 +7,7 @@ use std::time::{Duration, Instant, SystemTime};
 pub(crate) const IDLE_THRESHOLD: Duration = Duration::from_millis(1500);
 pub(crate) const STATUS_POLL_INTERVAL: Duration = Duration::from_secs(2);
 pub(crate) const MAX_PTY_EVENTS_PER_FRAME: usize = 500;
-pub(crate) const SESSION_ITEM_HEIGHT: usize = 5;
-pub(crate) const PREVIEW_LINE_COUNT: usize = 3;
+pub(crate) const SESSION_ITEM_HEIGHT: usize = 3;
 
 // ── Claude Status (from statusline) ─────────────────────
 
@@ -154,7 +153,6 @@ pub(crate) enum SessionState {
 }
 
 impl SessionState {
-    #[allow(dead_code)]
     pub(crate) fn label(&self) -> &'static str {
         match self {
             SessionState::Working => "WORK",
@@ -166,7 +164,6 @@ impl SessionState {
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn color(&self) -> ratatui::style::Color {
         use ratatui::style::Color;
         match self {
@@ -206,6 +203,9 @@ pub(crate) struct Session {
     pub(crate) ralph_created_at: Option<Instant>,
     pub(crate) permission_mode: PermissionMode,
     pub(crate) transcript_mtime: Option<SystemTime>,
+    pub(crate) summary: Option<String>,
+    pub(crate) last_summary_hash: u64,
+    pub(crate) summary_pending: bool,
 }
 
 impl Session {

@@ -1,5 +1,5 @@
 use crate::app::{App, Focus, InputMode, LeftTab};
-use crate::session::{CliType, SessionState, PREVIEW_LINE_COUNT};
+use crate::session::{CliType, SessionState};
 use portable_pty::PtySize;
 use ratatui::{
     Frame,
@@ -21,7 +21,8 @@ impl App {
             Layout::vertical([Constraint::Fill(1), Constraint::Length(3)]).areas(frame.area());
 
         let [left_area, right_area] =
-            Layout::horizontal([Constraint::Length(38), Constraint::Fill(1)]).areas(main_area);
+            Layout::horizontal([Constraint::Length(self.left_panel_width), Constraint::Fill(1)])
+                .areas(main_area);
 
         self.last_sessions_area = left_area;
         match self.left_tab {
@@ -35,8 +36,14 @@ impl App {
     fn render_sessions(&mut self, frame: &mut Frame, area: Rect) {
         let focused = self.focus == Focus::Sessions && matches!(self.input_mode, InputMode::Normal);
 
+        // Apply right margin by shrinking the area
+        let area = Rect {
+            width: area.width.saturating_sub(2),
+            ..area
+        };
+
         // Inner width available for content (panel width minus borders and highlight symbol)
-        let inner_width = area.width.saturating_sub(6) as usize; // 2 border + 2 highlight + 2 padding
+        let inner_width = area.width.saturating_sub(4) as usize; // 2 border + 2 highlight
 
         let vis = self.visible_sessions();
         let items: Vec<ListItem> = vis
@@ -45,18 +52,8 @@ impl App {
                 let s = &self.sessions[idx];
                 let state = s.inferred_state();
 
-                let icon = if s.ralph_loop {
-                    "🔁"
-                } else {
-                    match state {
-                        SessionState::Working => "🔥",
-                        SessionState::Prompt => "☕",
-                        SessionState::Starting => "⏳",
-                        SessionState::Done => "💯",
-                        SessionState::Failed => "🫠",
-                        SessionState::Archived => "📦",
-                    }
-                };
+                let state_label = format!("[{}]", state.label());
+                let state_color = state.color();
 
                 let name_style = if state == SessionState::Archived {
                     Style::new().dark_gray()
@@ -64,12 +61,18 @@ impl App {
                     Style::default()
                 };
 
-                // Line 1: icon + name (left) + lines changed (right-aligned, cyan)
-                let icon_name = format!("{} {}", icon, s.name);
+                // Line 1: [STATE] name (left) + lines changed (right-aligned, cyan)
+                let state_width = state_label.len() + 1; // +1 for space
                 let lines_text = s.lines_changed_display().unwrap_or_default();
-                let pad1 = inner_width.saturating_sub(icon_name.chars().count() + lines_text.len());
+                let name_max = inner_width
+                    .saturating_sub(state_width)
+                    .saturating_sub(if lines_text.is_empty() { 0 } else { lines_text.len() + 1 });
+                let display_name: String = s.name.chars().take(name_max).collect();
+                let used = state_width + display_name.chars().count() + lines_text.len();
+                let pad1 = inner_width.saturating_sub(used);
                 let mut line1_spans = vec![
-                    Span::styled(icon_name, name_style),
+                    Span::styled(state_label, Style::new().fg(state_color).bold()),
+                    Span::styled(format!(" {}", display_name), name_style),
                     Span::raw(" ".repeat(pad1)),
                 ];
                 if !lines_text.is_empty() {
@@ -77,30 +80,7 @@ impl App {
                 }
                 let line1 = Line::from(line1_spans);
 
-                // Line 2: context bar + pct + turn count
-                // Preview lines: last output (dimmed, wrapped to fit width)
-                let previews = s.last_output_lines(PREVIEW_LINE_COUNT);
-                let full_text = previews.join(" ");
-                let max_len = inner_width.saturating_sub(1); // 1 char left indent
-                let mut preview_lines: Vec<Line> = Vec::new();
-                if !full_text.is_empty() && max_len > 0 {
-                    let chars: Vec<char> = full_text.chars().collect();
-                    let mut pos = 0;
-                    while pos < chars.len() && preview_lines.len() < PREVIEW_LINE_COUNT {
-                        let end = (pos + max_len).min(chars.len());
-                        let chunk: String = chars[pos..end].iter().collect();
-                        preview_lines.push(Line::from(Span::styled(
-                            format!(" {}", chunk),
-                            Style::new().dark_gray(),
-                        )));
-                        pos = end;
-                    }
-                }
-                // Pad to PREVIEW_LINE_COUNT for consistent item height
-                while preview_lines.len() < PREVIEW_LINE_COUNT {
-                    preview_lines.push(Line::from(Span::raw("")));
-                }
-
+                // Line 2: context bar + pct + turn count + permission mode
                 let line2 = if s.claude_status.is_some() {
                     let bar_width = 10;
                     let (bar, bar_color) = s.context_bar(bar_width);
@@ -132,9 +112,21 @@ impl App {
                     Line::from(Span::raw(""))
                 };
 
-                let mut lines = vec![line1, line2];
-                lines.extend(preview_lines);
-                ListItem::new(lines)
+                // Line 3: AI summary (dimmed) or "..." if pending
+                let line3 = if let Some(ref summary) = s.summary {
+                    let max_len = inner_width.saturating_sub(1);
+                    let display: String = summary.chars().take(max_len).collect();
+                    Line::from(Span::styled(
+                        format!(" {}", display),
+                        Style::new().fg(Color::DarkGray),
+                    ))
+                } else if s.summary_pending {
+                    Line::from(Span::styled(" ...", Style::new().fg(Color::DarkGray)))
+                } else {
+                    Line::from(Span::raw(""))
+                };
+
+                ListItem::new(vec![line1, line2, line3])
             })
             .collect();
 
@@ -149,8 +141,7 @@ impl App {
                 Block::bordered()
                     .title(" Sessions ")
                     .border_type(BorderType::Rounded)
-                    .border_style(border_style)
-                    .padding(Padding::right(2)),
+                    .border_style(border_style),
             )
             .highlight_style(Style::new().bg(PASTEL_CYAN).fg(Color::Black).bold())
             .highlight_symbol("> ");

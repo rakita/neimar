@@ -5,6 +5,7 @@ use std::time::Instant;
 pub(crate) enum AppEvent {
     PtyOutput(usize, Vec<u8>),
     PtyExited(usize),
+    SummaryResult(usize, String),
 }
 
 pub(crate) fn apply_event(app: &mut App, event: AppEvent) {
@@ -24,6 +25,16 @@ pub(crate) fn apply_event(app: &mut App, event: AppEvent) {
                 session.status = SessionStatus::Completed;
                 session.pty_writer = None;
                 session.pending_ralph_command = None;
+            }
+        }
+        AppEvent::SummaryResult(id, text) => {
+            if let Some(&idx) = app.session_id_map.get(&id)
+                && let Some(session) = app.sessions.get_mut(idx)
+            {
+                session.summary_pending = false;
+                if !text.is_empty() {
+                    session.summary = Some(text);
+                }
             }
         }
     }
