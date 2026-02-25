@@ -7,7 +7,7 @@ use std::time::{Duration, Instant, SystemTime};
 pub(crate) const IDLE_THRESHOLD: Duration = Duration::from_millis(1500);
 pub(crate) const STATUS_POLL_INTERVAL: Duration = Duration::from_secs(2);
 pub(crate) const MAX_PTY_EVENTS_PER_FRAME: usize = 500;
-pub(crate) const SESSION_ITEM_HEIGHT: usize = 3;
+pub(crate) const SESSION_ITEM_HEIGHT: usize = 2;
 
 // ── Claude Status (from statusline) ─────────────────────
 
@@ -98,14 +98,6 @@ impl PermissionMode {
         }
     }
 
-    pub(crate) fn color(&self) -> ratatui::style::Color {
-        use ratatui::style::Color;
-        match self {
-            PermissionMode::Plan => Color::Magenta,
-            PermissionMode::AcceptEdits => Color::Green,
-            PermissionMode::Unknown => Color::DarkGray,
-        }
-    }
 }
 
 // ── CLI Type ────────────────────────────────────────────
@@ -155,12 +147,12 @@ pub(crate) enum SessionState {
 impl SessionState {
     pub(crate) fn label(&self) -> &'static str {
         match self {
-            SessionState::Working => "WORK",
-            SessionState::Prompt => "WAIT",
-            SessionState::Starting => "INIT",
-            SessionState::Done => "DONE",
-            SessionState::Failed => "FAIL",
-            SessionState::Archived => "ARCH",
+            SessionState::Working => "🧱",
+            SessionState::Prompt => "💬",
+            SessionState::Starting => "⏳",
+            SessionState::Done => "🟢",
+            SessionState::Failed => "🔴",
+            SessionState::Archived => "⬛",
         }
     }
 
@@ -204,7 +196,7 @@ pub(crate) struct Session {
     pub(crate) permission_mode: PermissionMode,
     pub(crate) transcript_mtime: Option<SystemTime>,
     pub(crate) summary: Option<String>,
-    pub(crate) last_summary_hash: u64,
+    pub(crate) last_summary_text: String,
     pub(crate) summary_pending: bool,
 }
 
@@ -235,110 +227,24 @@ impl Session {
         }
     }
 
-    pub(crate) fn context_bar(&self, width: usize) -> (String, ratatui::style::Color) {
-        let pct = self
-            .claude_status
-            .as_ref()
-            .map(|cs| cs.context_window.used_percentage)
-            .unwrap_or(0.0);
-        let filled = ((pct / 100.0) * width as f64).round() as usize;
-        let filled = filled.min(width);
-        let empty = width - filled;
-        let bar = format!("{}{}", "▰".repeat(filled), "▱".repeat(empty));
-        let color = if pct >= 80.0 {
-            ratatui::style::Color::Red
-        } else if pct >= 60.0 {
-            ratatui::style::Color::Yellow
-        } else {
-            ratatui::style::Color::Green
-        };
-        (bar, color)
-    }
-
-    pub(crate) fn lines_changed_display(&self) -> Option<String> {
-        self.claude_status.as_ref().and_then(|cs| {
-            if cs.cost.total_lines_added > 0 || cs.cost.total_lines_removed > 0 {
-                Some(format!(
-                    "+{}/-{}",
-                    cs.cost.total_lines_added, cs.cost.total_lines_removed
-                ))
-            } else {
-                None
-            }
-        })
-    }
-
-    fn is_marker_line(s: &str) -> bool {
-        let c = match s.chars().next() {
-            Some(c) => c,
-            None => return false,
-        };
-        c == '⏺'
-    }
-
-    fn is_dim_or_gray(cell: &vt100::Cell) -> bool {
-        if cell.dim() {
-            return true;
-        }
-        match cell.fgcolor() {
-            vt100::Color::Default => false,
-            vt100::Color::Idx(idx) => matches!(idx, 0 | 8),
-            vt100::Color::Rgb(r, g, b) => {
-                let max = r.max(g).max(b);
-                let min = r.min(g).min(b);
-                (max - min) < 30 && max < 180
-            }
-        }
-    }
-
-    fn is_bright_marker_row(screen: &vt100::Screen, row: u16) -> bool {
-        let (_, cols) = screen.size();
-        for col in 0..cols {
-            let Some(cell) = screen.cell(row, col) else {
-                break;
-            };
-            let contents = cell.contents();
-            if contents.is_empty() || contents == " " {
-                continue;
-            }
-            if contents.starts_with('⏺') {
-                return !Self::is_dim_or_gray(cell);
-            }
-            return false;
-        }
-        false
-    }
-
-    pub(crate) fn last_output_lines(&self, n: usize) -> Vec<String> {
+    pub(crate) fn last_n_lines(&self, n: usize) -> Vec<String> {
         let screen = self.parser.screen();
         let (rows, cols) = screen.size();
-        let all_rows: Vec<String> = screen
-            .rows(0, cols)
-            .take(rows as usize)
+        let all_rows: Vec<String> = screen.rows(0, cols).take(rows as usize).collect();
+        let mut result: Vec<String> = all_rows
+            .iter()
+            .rev()
+            .filter_map(|line| {
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            })
+            .take(n)
             .collect();
-        // Find the last line starting with a bright marker, then collect up to n lines from there
-        let mut start = None;
-        for (i, line) in all_rows.iter().enumerate().rev() {
-            let trimmed = line.trim();
-            if Self::is_marker_line(trimmed) && Self::is_bright_marker_row(screen, i as u16) {
-                start = Some(i);
-                break;
-            }
-        }
-        let Some(start) = start else {
-            return Vec::new();
-        };
-        let mut result = Vec::with_capacity(n);
-        for line in &all_rows[start..] {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            result.push(trimmed.to_string());
-            if result.len() >= n {
-                break;
-            }
-        }
+        result.reverse();
         result
     }
 

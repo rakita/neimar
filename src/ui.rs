@@ -20,6 +20,10 @@ impl App {
         let [main_area, status_area] =
             Layout::vertical([Constraint::Fill(1), Constraint::Length(3)]).areas(frame.area());
 
+        if self.left_panel_half {
+            self.left_panel_width = frame.area().width / 2;
+        }
+
         let [left_area, right_area] =
             Layout::horizontal([Constraint::Length(self.left_panel_width), Constraint::Fill(1)])
                 .areas(main_area);
@@ -52,7 +56,7 @@ impl App {
                 let s = &self.sessions[idx];
                 let state = s.inferred_state();
 
-                let state_label = format!("[{}]", state.label());
+                let state_label = state.label().to_string();
                 let state_color = state.color();
 
                 let name_style = if state == SessionState::Archived {
@@ -61,59 +65,39 @@ impl App {
                     Style::default()
                 };
 
-                // Line 1: [STATE] name (left) + lines changed (right-aligned, cyan)
+                // Line 1: [STATE] name (left) + context info (right-aligned)
                 let state_width = state_label.len() + 1; // +1 for space
-                let lines_text = s.lines_changed_display().unwrap_or_default();
+                let display_name: String = s.name.clone();
+                let right_text = if let Some(ref cs) = s.claude_status {
+                    let pct = cs.context_window.used_percentage as u32;
+                    let turn_str = format!("T:{}", s.turn_count);
+                    let mode_label = s.permission_mode.label();
+                    if mode_label.is_empty() {
+                        format!("{}% {}", pct, turn_str)
+                    } else {
+                        format!("{}% {} {}", pct, turn_str, mode_label)
+                    }
+                } else {
+                    String::new()
+                };
                 let name_max = inner_width
                     .saturating_sub(state_width)
-                    .saturating_sub(if lines_text.is_empty() { 0 } else { lines_text.len() + 1 });
-                let display_name: String = s.name.chars().take(name_max).collect();
-                let used = state_width + display_name.chars().count() + lines_text.len();
+                    .saturating_sub(if right_text.is_empty() { 0 } else { right_text.len() + 1 });
+                let display_name: String = display_name.chars().take(name_max).collect();
+                let used = state_width + display_name.chars().count() + right_text.len();
                 let pad1 = inner_width.saturating_sub(used);
                 let mut line1_spans = vec![
                     Span::styled(state_label, Style::new().fg(state_color).bold()),
                     Span::styled(format!(" {}", display_name), name_style),
                     Span::raw(" ".repeat(pad1)),
                 ];
-                if !lines_text.is_empty() {
-                    line1_spans.push(Span::styled(lines_text, Style::new().fg(Color::Cyan)));
+                if !right_text.is_empty() {
+                    line1_spans.push(Span::styled(right_text, Style::new().fg(Color::DarkGray)));
                 }
                 let line1 = Line::from(line1_spans);
 
-                // Line 2: context bar + pct + turn count + permission mode
-                let line2 = if s.claude_status.is_some() {
-                    let bar_width = 10;
-                    let (bar, bar_color) = s.context_bar(bar_width);
-                    let pct = s
-                        .claude_status
-                        .as_ref()
-                        .unwrap()
-                        .context_window
-                        .used_percentage as u32;
-                    let pct_str = format!("{}%", pct);
-                    let turn_str = format!("T:{}", s.turn_count);
-                    let mode_label = s.permission_mode.label();
-                    let left_part = format!(" {} {:>3}  {:<5}", bar, pct_str, turn_str);
-                    let mut line2_spans = vec![
-                        Span::raw(" "),
-                        Span::styled(bar, Style::new().fg(bar_color)),
-                        Span::raw(format!(" {:>3}  {:<5}", pct_str, turn_str)),
-                    ];
-                    if !mode_label.is_empty() {
-                        let pad2 = inner_width.saturating_sub(left_part.chars().count() + mode_label.len());
-                        line2_spans.push(Span::raw(" ".repeat(pad2)));
-                        line2_spans.push(Span::styled(
-                            mode_label,
-                            Style::new().fg(s.permission_mode.color()),
-                        ));
-                    }
-                    Line::from(line2_spans)
-                } else {
-                    Line::from(Span::raw(""))
-                };
-
-                // Line 3: AI summary (dimmed) or "..." if pending
-                let line3 = if let Some(ref summary) = s.summary {
+                // Line 2: AI summary (or "..." if pending)
+                let line2 = if let Some(ref summary) = s.summary {
                     let max_len = inner_width.saturating_sub(1);
                     let display: String = summary.chars().take(max_len).collect();
                     Line::from(Span::styled(
@@ -126,7 +110,7 @@ impl App {
                     Line::from(Span::raw(""))
                 };
 
-                ListItem::new(vec![line1, line2, line3])
+                ListItem::new(vec![line1, line2])
             })
             .collect();
 
@@ -441,6 +425,8 @@ impl App {
                     Span::raw(": archive  "),
                     Span::styled("a", Style::new().fg(Color::Yellow).bold()),
                     Span::raw(": toggle archived  "),
+                    Span::styled("h", Style::new().fg(Color::Yellow).bold()),
+                    Span::raw(": half  "),
                     Span::styled("j/k", Style::new().fg(Color::Yellow).bold()),
                     Span::raw(": navigate  "),
                     Span::styled("q", Style::new().fg(Color::Yellow).bold()),

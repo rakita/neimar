@@ -8,7 +8,6 @@ use ratatui::widgets::ListState;
 use std::collections::HashMap;
 use std::io::{Read as _, Seek, SeekFrom, Write};
 use std::path::PathBuf;
-use std::hash::{Hash, Hasher};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
@@ -100,6 +99,7 @@ pub(crate) struct App {
     pub(crate) last_right_panel_inner: Rect,
     pub(crate) left_panel_width: u16,
     pub(crate) dragging_divider: bool,
+    pub(crate) left_panel_half: bool,
 }
 
 impl App {
@@ -132,8 +132,9 @@ impl App {
             selected_cli_type: CliType::Claude,
             selection: None,
             last_right_panel_inner: Rect::default(),
-            left_panel_width: 28,
+            left_panel_width: 42,
             dragging_divider: false,
+            left_panel_half: false,
         }
     }
 
@@ -241,7 +242,7 @@ impl App {
                     permission_mode: PermissionMode::Unknown,
                     transcript_mtime: None,
                     summary: None,
-                    last_summary_hash: 0,
+                    last_summary_text: String::new(),
                     summary_pending: false,
                 };
                 session
@@ -291,7 +292,7 @@ impl App {
                     permission_mode: PermissionMode::Unknown,
                     transcript_mtime: None,
                     summary: None,
-                    last_summary_hash: 0,
+                    last_summary_text: String::new(),
                     summary_pending: false,
                 };
                 session
@@ -351,7 +352,7 @@ impl App {
             permission_mode: PermissionMode::Unknown,
             transcript_mtime: None,
             summary: None,
-            last_summary_hash: 0,
+            last_summary_text: String::new(),
             summary_pending: false,
         };
 
@@ -495,21 +496,22 @@ impl App {
                 continue;
             }
 
-            let lines = session.last_output_lines(10);
+            let lines = session.last_n_lines(100);
             if lines.is_empty() {
                 continue;
             }
 
             let text = lines.join("\n");
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            text.hash(&mut hasher);
-            let hash = hasher.finish();
 
-            if hash == session.last_summary_hash {
-                continue;
+            // Only summarize if >20% different from last summarized text
+            if !session.last_summary_text.is_empty() {
+                let diff_ratio = text_diff_ratio(&session.last_summary_text, &text);
+                if diff_ratio <= 0.20 {
+                    continue;
+                }
             }
 
-            session.last_summary_hash = hash;
+            session.last_summary_text = text.clone();
             session.summary_pending = true;
 
             let id = session.id;
@@ -525,6 +527,7 @@ impl App {
                     ))
                     .arg("--model")
                     .arg("haiku")
+                    .stdin(std::process::Stdio::null())
                     .output()
                     .await;
 
@@ -656,6 +659,17 @@ impl App {
         }
         self.cleanup_all_status_files();
     }
+}
+
+fn text_diff_ratio(old: &str, new: &str) -> f64 {
+    let old_lines: Vec<&str> = old.lines().collect();
+    let new_lines: Vec<&str> = new.lines().collect();
+    let total = old_lines.len().max(new_lines.len());
+    if total == 0 {
+        return 0.0;
+    }
+    let common = old_lines.iter().filter(|l| new_lines.contains(l)).count();
+    1.0 - (common as f64 / total as f64)
 }
 
 fn extract_permission_mode(line: &str) -> Option<PermissionMode> {

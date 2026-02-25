@@ -204,6 +204,12 @@ impl App {
                     self.input_buffer = self.sessions[real_idx].name.clone();
                 }
             }
+            KeyCode::Char('h') => {
+                self.left_panel_half = !self.left_panel_half;
+                if !self.left_panel_half {
+                    self.left_panel_width = 42;
+                }
+            }
             KeyCode::Char('a') => {
                 self.show_archived = !self.show_archived;
                 let vis = self.visible_sessions();
@@ -585,6 +591,7 @@ impl App {
             MouseEventKind::Drag(MouseButton::Left) => {
                 // Handle divider dragging
                 if self.dragging_divider {
+                    self.left_panel_half = false;
                     let total_width =
                         self.last_sessions_area.width + self.last_right_panel_area.width;
                     let min_width: u16 = 15;
