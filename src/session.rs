@@ -98,6 +98,13 @@ impl PermissionMode {
         }
     }
 
+    pub(crate) fn emoji(&self) -> &'static str {
+        match self {
+            PermissionMode::Plan => "⏸",
+            PermissionMode::AcceptEdits => "⏩",
+            PermissionMode::Unknown => "",
+        }
+    }
 }
 
 // ── CLI Type ────────────────────────────────────────────
@@ -121,6 +128,43 @@ impl CliType {
         match self {
             CliType::Claude => "claude",
             CliType::Amp => "amp",
+        }
+    }
+}
+
+// ── AI State (from LLM classification) ─────────────────
+
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum AiState {
+    Working,
+    Input,
+    Done,
+}
+
+impl AiState {
+    pub(crate) fn parse(word: &str) -> Option<Self> {
+        match word {
+            "WORKING" => Some(AiState::Working),
+            "INPUT" => Some(AiState::Input),
+            "DONE" => Some(AiState::Done),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn label(&self) -> &'static str {
+        match self {
+            AiState::Working => "WORKING",
+            AiState::Input => "INPUT",
+            AiState::Done => "DONE",
+        }
+    }
+
+    pub(crate) fn color(&self) -> ratatui::style::Color {
+        use ratatui::style::Color;
+        match self {
+            AiState::Working => Color::Yellow,
+            AiState::Input => Color::Cyan,
+            AiState::Done => Color::Green,
         }
     }
 }
@@ -195,9 +239,11 @@ pub(crate) struct Session {
     pub(crate) ralph_created_at: Option<Instant>,
     pub(crate) permission_mode: PermissionMode,
     pub(crate) transcript_mtime: Option<SystemTime>,
+    pub(crate) ai_state: Option<AiState>,
     pub(crate) summary: Option<String>,
     pub(crate) last_summary_text: String,
     pub(crate) summary_pending: bool,
+    pub(crate) last_summary_at: Option<Instant>,
 }
 
 impl Session {
@@ -217,7 +263,14 @@ impl Session {
             SessionStatus::Failed => SessionState::Failed,
             SessionStatus::Running => {
                 if self.is_actively_working() {
-                    SessionState::Working
+                    return SessionState::Working; // real-time PTY activity = definitively working
+                }
+                if let Some(ai) = self.ai_state {
+                    match ai {
+                        AiState::Working => SessionState::Working,
+                        AiState::Input => SessionState::Prompt,
+                        AiState::Done => SessionState::Done,
+                    }
                 } else if self.last_pty_output.is_some() {
                     SessionState::Prompt
                 } else {
@@ -227,10 +280,16 @@ impl Session {
         }
     }
 
-    pub(crate) fn last_n_lines(&self, n: usize) -> Vec<String> {
+    pub(crate) fn last_n_lines(&mut self, n: usize) -> Vec<String> {
+        // Enable full scrollback so we can read beyond the visible screen
+        self.parser.screen_mut().set_scrollback(usize::MAX);
         let screen = self.parser.screen();
+        let scrollback = screen.scrollback();
         let (rows, cols) = screen.size();
-        let all_rows: Vec<String> = screen.rows(0, cols).take(rows as usize).collect();
+        let total_rows = rows as usize + scrollback;
+        let all_rows: Vec<String> = screen.rows(0, cols).take(total_rows).collect();
+        // Reset scrollback
+        self.parser.screen_mut().set_scrollback(0);
         let mut result: Vec<String> = all_rows
             .iter()
             .rev()
@@ -246,6 +305,31 @@ impl Session {
             .collect();
         result.reverse();
         result
+    }
+
+    pub(crate) fn detect_permission_mode_from_pty(&mut self) -> PermissionMode {
+        let lines = self.last_n_lines(3);
+        for line in &lines {
+            let lower = line.to_lowercase();
+            if lower.contains("plan mode") {
+                return PermissionMode::Plan;
+            }
+            if lower.contains("auto-accept") || lower.contains("accept edits") {
+                return PermissionMode::AcceptEdits;
+            }
+        }
+        PermissionMode::Unknown
+    }
+
+    pub(crate) fn detect_permission_mode_from_bytes(bytes: &[u8]) -> PermissionMode {
+        let text = String::from_utf8_lossy(bytes).to_lowercase();
+        if text.contains("plan mode") {
+            PermissionMode::Plan
+        } else if text.contains("auto-accept") || text.contains("accept edits") {
+            PermissionMode::AcceptEdits
+        } else {
+            PermissionMode::Unknown
+        }
     }
 
     pub(crate) fn max_scrollback(&mut self) -> usize {

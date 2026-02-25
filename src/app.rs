@@ -241,9 +241,11 @@ impl App {
                     ralph_created_at: None,
                     permission_mode: PermissionMode::Unknown,
                     transcript_mtime: None,
+                    ai_state: None,
                     summary: None,
                     last_summary_text: String::new(),
                     summary_pending: false,
+                    last_summary_at: None,
                 };
                 session
                     .parser
@@ -251,7 +253,10 @@ impl App {
                 self.sessions.push(session);
                 self.rebuild_session_id_map();
                 let vis = self.visible_sessions();
-                self.list_state.select(Some(vis.len() - 1));
+                let new_real_idx = self.sessions.len() - 1;
+                let vis_idx = vis.iter().position(|&i| i == new_real_idx)
+                    .unwrap_or(vis.len().saturating_sub(1));
+                self.list_state.select(Some(vis_idx));
                 return id;
             }
         };
@@ -291,9 +296,11 @@ impl App {
                     ralph_created_at: None,
                     permission_mode: PermissionMode::Unknown,
                     transcript_mtime: None,
+                    ai_state: None,
                     summary: None,
                     last_summary_text: String::new(),
                     summary_pending: false,
+                    last_summary_at: None,
                 };
                 session
                     .parser
@@ -301,7 +308,10 @@ impl App {
                 self.sessions.push(session);
                 self.rebuild_session_id_map();
                 let vis = self.visible_sessions();
-                self.list_state.select(Some(vis.len() - 1));
+                let new_real_idx = self.sessions.len() - 1;
+                let vis_idx = vis.iter().position(|&i| i == new_real_idx)
+                    .unwrap_or(vis.len().saturating_sub(1));
+                self.list_state.select(Some(vis_idx));
                 return id;
             }
         };
@@ -351,15 +361,20 @@ impl App {
             ralph_created_at: None,
             permission_mode: PermissionMode::Unknown,
             transcript_mtime: None,
+            ai_state: None,
             summary: None,
             last_summary_text: String::new(),
             summary_pending: false,
+            last_summary_at: None,
         };
 
         self.sessions.push(session);
         self.rebuild_session_id_map();
         let vis = self.visible_sessions();
-        self.list_state.select(Some(vis.len() - 1));
+        let new_real_idx = self.sessions.len() - 1;
+        let vis_idx = vis.iter().position(|&i| i == new_real_idx)
+            .unwrap_or(vis.len().saturating_sub(1));
+        self.list_state.select(Some(vis_idx));
         self.focus = Focus::Terminal;
         id
     }
@@ -410,6 +425,18 @@ impl App {
     pub(crate) fn cleanup_all_status_files(&self) {
         for session in &self.sessions {
             Self::cleanup_status_file(&session.status_file);
+        }
+    }
+
+    pub(crate) fn update_pty_permission_modes(&mut self) {
+        for session in &mut self.sessions {
+            if session.status != SessionStatus::Running || session.archived {
+                continue;
+            }
+            let detected = session.detect_permission_mode_from_pty();
+            if detected != PermissionMode::Unknown {
+                session.permission_mode = detected;
+            }
         }
     }
 
@@ -488,31 +515,44 @@ impl App {
     // ── Summary polling ─────────────────────────────────
 
     pub(crate) fn poll_summaries(&mut self) {
+        const SUMMARY_FORCE_INTERVAL: Duration = Duration::from_secs(30);
+
         for session in &mut self.sessions {
-            if session.archived
-                || session.status != SessionStatus::Running
-                || session.summary_pending
-            {
+            if session.archived || session.summary_pending {
                 continue;
             }
 
-            let lines = session.last_n_lines(100);
-            if lines.is_empty() {
+            // Completed sessions: allow one final summary if stale, then skip
+            if session.status != SessionStatus::Running {
+                match session.last_summary_at {
+                    Some(t) if t.elapsed() < SUMMARY_FORCE_INTERVAL => continue,
+                    _ => {}
+                }
+            }
+
+            let mut lines = session.last_n_lines(100);
+            if lines.len() <= 3 {
                 continue;
             }
+            lines.truncate(lines.len() - 1);
 
             let text = lines.join("\n");
 
-            // Only summarize if >20% different from last summarized text
+            // Check if enough has changed, with a time-based override
             if !session.last_summary_text.is_empty() {
                 let diff_ratio = text_diff_ratio(&session.last_summary_text, &text);
-                if diff_ratio <= 0.20 {
-                    continue;
+                if diff_ratio <= 0.15 {
+                    // Force refresh if last summary is older than 30s
+                    match session.last_summary_at {
+                        Some(t) if t.elapsed() < SUMMARY_FORCE_INTERVAL => continue,
+                        _ => {}
+                    }
                 }
             }
 
             session.last_summary_text = text.clone();
             session.summary_pending = true;
+            session.last_summary_at = Some(Instant::now());
 
             let id = session.id;
             let tx = self.event_tx.clone();
@@ -520,9 +560,18 @@ impl App {
                 let result = tokio::process::Command::new("claude")
                     .arg("-p")
                     .arg(format!(
-                        "Summarize in max 5 words what this coding session is doing. \
-                         Output ONLY the summary, no quotes, no punctuation at the end. \
-                         Here is the recent output:\n\n{}",
+                        "Your PRIMARY task: classify what Claude is doing in this terminal session.\n\
+                         Output exactly ONE line: STATE brief_summary\n\n\
+                         STATE rules (apply first match):\n\
+                         \x20 INPUT   — Claude stopped and needs user response. Signals: question mark, \"Would you like\", \"Should I\", \"Do you want\", \"Please provide\", permission prompt, or choices listed.\n\
+                         \x20 WORKING — Claude is actively executing. Signals: tool calls, file edits, command output, reading files, compiling, testing.\n\
+                         \x20 DONE    — Claude finished and is idle. Signals: summary of work done, \"I've finished\", \"I've implemented\", \"Complete\", or idle prompt after work.\n\n\
+                         brief_summary: 3-5 words. For INPUT: what user must decide/answer. For WORKING: what Claude is doing. For DONE: what was accomplished.\n\n\
+                         Examples:\n\
+                         \x20 INPUT need database schema decision\n\
+                         \x20 WORKING running test suite\n\
+                         \x20 DONE auth module implemented\n\n\
+                         Terminal output:\n\n{}",
                         text
                     ))
                     .arg("--model")

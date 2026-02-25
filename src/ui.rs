@@ -65,10 +65,15 @@ impl App {
                     Style::default()
                 };
 
-                // Line 1: [STATE] name (left) + context info (right-aligned)
-                let state_width = state_label.len() + 1; // +1 for space
+                // Line 1: [MODE_EMOJI][STATE] name (left) + ai_state + context info (right-aligned)
+                let mode_emoji = s.permission_mode.emoji();
+                let state_width = mode_emoji.len() + state_label.len() + 1 + if mode_emoji.is_empty() { 0 } else { 1 }; // +1 for space, +1 for gap after mode emoji
                 let display_name: String = s.name.clone();
-                let right_text = if let Some(ref cs) = s.claude_status {
+
+                // Build right-side components: AI state label + metadata
+                let ai_label = s.ai_state.map(|a| a.label().to_string());
+                let ai_color = s.ai_state.map(|a| a.color());
+                let metadata_text = if let Some(ref cs) = s.claude_status {
                     let pct = cs.context_window.used_percentage as u32;
                     let turn_str = format!("T:{}", s.turn_count);
                     let mode_label = s.permission_mode.label();
@@ -80,32 +85,49 @@ impl App {
                 } else {
                     String::new()
                 };
+
+                let right_width = match (&ai_label, metadata_text.is_empty()) {
+                    (Some(ai), false) => ai.len() + 1 + metadata_text.len(),
+                    (Some(ai), true) => ai.len(),
+                    (None, false) => metadata_text.len(),
+                    (None, true) => 0,
+                };
+
                 let name_max = inner_width
                     .saturating_sub(state_width)
-                    .saturating_sub(if right_text.is_empty() { 0 } else { right_text.len() + 1 });
+                    .saturating_sub(if right_width == 0 { 0 } else { right_width + 1 });
                 let display_name: String = display_name.chars().take(name_max).collect();
-                let used = state_width + display_name.chars().count() + right_text.len();
+                let used = state_width + display_name.chars().count() + right_width;
                 let pad1 = inner_width.saturating_sub(used);
-                let mut line1_spans = vec![
+                let mut line1_spans = vec![];
+                if !mode_emoji.is_empty() {
+                    line1_spans.push(Span::raw(format!("{} ", mode_emoji)));
+                }
+                line1_spans.extend([
                     Span::styled(state_label, Style::new().fg(state_color).bold()),
                     Span::styled(format!(" {}", display_name), name_style),
                     Span::raw(" ".repeat(pad1)),
-                ];
-                if !right_text.is_empty() {
-                    line1_spans.push(Span::styled(right_text, Style::new().fg(Color::DarkGray)));
+                ]);
+                if let Some(ref ai) = ai_label {
+                    line1_spans.push(Span::styled(ai.clone(), Style::new().fg(ai_color.unwrap()).bold()));
+                    if !metadata_text.is_empty() {
+                        line1_spans.push(Span::styled(format!(" {}", metadata_text), Style::new().fg(Color::DarkGray)));
+                    }
+                } else if !metadata_text.is_empty() {
+                    line1_spans.push(Span::styled(metadata_text, Style::new().fg(Color::DarkGray)));
                 }
                 let line1 = Line::from(line1_spans);
 
-                // Line 2: AI summary (or "..." if pending)
+                // Line 2: summary text only
                 let line2 = if let Some(ref summary) = s.summary {
                     let max_len = inner_width.saturating_sub(1);
                     let display: String = summary.chars().take(max_len).collect();
-                    Line::from(Span::styled(
-                        format!(" {}", display),
-                        Style::new().fg(Color::DarkGray),
-                    ))
+                    Line::from(vec![
+                        Span::raw(" "),
+                        Span::styled(display, Style::new().fg(Color::White)),
+                    ])
                 } else if s.summary_pending {
-                    Line::from(Span::styled(" ...", Style::new().fg(Color::DarkGray)))
+                    Line::from(Span::styled(" ...", Style::new().fg(Color::White)))
                 } else {
                     Line::from(Span::raw(""))
                 };

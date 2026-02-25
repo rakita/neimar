@@ -1,5 +1,5 @@
 use crate::app::App;
-use crate::session::SessionStatus;
+use crate::session::{AiState, PermissionMode, Session, SessionStatus};
 use std::time::Instant;
 
 pub(crate) enum AppEvent {
@@ -13,14 +13,21 @@ pub(crate) fn apply_event(app: &mut App, event: AppEvent) {
         AppEvent::PtyOutput(id, bytes) => {
             if let Some(&idx) = app.session_id_map.get(&id) {
                 if let Some(session) = app.sessions.get_mut(idx) {
-                    session.parser.process(&bytes);
-                    session.last_pty_output = Some(Instant::now());
+                    if session.id == id {
+                        session.parser.process(&bytes);
+                        session.last_pty_output = Some(Instant::now());
+                        let detected = Session::detect_permission_mode_from_bytes(&bytes);
+                        if detected != PermissionMode::Unknown {
+                            session.permission_mode = detected;
+                        }
+                    }
                 }
             }
         }
         AppEvent::PtyExited(id) => {
             if let Some(&idx) = app.session_id_map.get(&id)
                 && let Some(session) = app.sessions.get_mut(idx)
+                && session.id == id
             {
                 session.status = SessionStatus::Completed;
                 session.pty_writer = None;
@@ -28,12 +35,22 @@ pub(crate) fn apply_event(app: &mut App, event: AppEvent) {
             }
         }
         AppEvent::SummaryResult(id, text) => {
-            if let Some(&idx) = app.session_id_map.get(&id)
-                && let Some(session) = app.sessions.get_mut(idx)
-            {
+            if let Some(session) = app.sessions.iter_mut().find(|s| s.id == id) {
                 session.summary_pending = false;
                 if !text.is_empty() {
-                    session.summary = Some(text);
+                    if let Some(space_idx) = text.find(' ') {
+                        let first_word = &text[..space_idx];
+                        if let Some(state) = AiState::parse(first_word) {
+                            session.ai_state = Some(state);
+                            session.summary = Some(text[space_idx + 1..].to_string());
+                        } else {
+                            session.summary = Some(text);
+                        }
+                    } else if let Some(state) = AiState::parse(&text) {
+                        session.ai_state = Some(state);
+                    } else {
+                        session.summary = Some(text);
+                    }
                 }
             }
         }
