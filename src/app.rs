@@ -246,6 +246,7 @@ impl App {
                     last_summary_text: String::new(),
                     summary_pending: false,
                     last_summary_at: None,
+                    forced_summary_count: 0,
                 };
                 session
                     .parser
@@ -261,13 +262,18 @@ impl App {
             }
         };
 
-        let status_path =
-            PathBuf::from(format!("/tmp/neimar-{}-status-{}", std::process::id(), id));
+        let status_path = if cli_type == CliType::Console {
+            PathBuf::new()
+        } else {
+            PathBuf::from(format!("/tmp/neimar-{}-status-{}", std::process::id(), id))
+        };
 
         // Ralph sessions spawn interactive claude (no -p), regular sessions use the cli_type command
         let mut cmd = CommandBuilder::new(cli_type.command());
         cmd.env("TERM", "xterm-256color");
-        cmd.env("NEIMAR_STATUS_FILE", status_path.to_str().unwrap());
+        if !status_path.as_os_str().is_empty() {
+            cmd.env("NEIMAR_STATUS_FILE", status_path.to_str().unwrap());
+        }
         cmd.cwd(std::env::current_dir().unwrap());
 
         let child = match pair.slave.spawn_command(cmd) {
@@ -301,6 +307,7 @@ impl App {
                     last_summary_text: String::new(),
                     summary_pending: false,
                     last_summary_at: None,
+                    forced_summary_count: 0,
                 };
                 session
                     .parser
@@ -366,6 +373,7 @@ impl App {
             last_summary_text: String::new(),
             summary_pending: false,
             last_summary_at: None,
+            forced_summary_count: 0,
         };
 
         self.sessions.push(session);
@@ -430,7 +438,7 @@ impl App {
 
     pub(crate) fn update_pty_permission_modes(&mut self) {
         for session in &mut self.sessions {
-            if session.status != SessionStatus::Running || session.archived {
+            if session.status != SessionStatus::Running || session.archived || session.cli_type == CliType::Console {
                 continue;
             }
             let detected = session.detect_permission_mode_from_pty();
@@ -458,13 +466,14 @@ impl App {
             if mtime == session.status_file_mtime {
                 continue;
             }
-            if let Ok(contents) = std::fs::read_to_string(&session.status_file)
-                && let Ok(status) = serde_json::from_str::<ClaudeStatus>(&contents)
-            {
-                session.claude_status = Some(status);
-                session.turn_count += 1;
+            if let Ok(contents) = std::fs::read_to_string(&session.status_file) {
+                if let Ok(status) = serde_json::from_str::<ClaudeStatus>(&contents) {
+                    session.claude_status = Some(status);
+                    session.turn_count += 1;
+                    session.status_file_mtime = mtime;
+                }
+                // else: partial write, don't update mtime so we retry next poll
             }
-            session.status_file_mtime = mtime;
         }
 
         // Poll transcript files for permission mode
@@ -518,7 +527,7 @@ impl App {
         const SUMMARY_FORCE_INTERVAL: Duration = Duration::from_secs(30);
 
         for session in &mut self.sessions {
-            if session.archived || session.summary_pending {
+            if session.archived || session.summary_pending || session.cli_type == CliType::Console {
                 continue;
             }
 
@@ -526,7 +535,12 @@ impl App {
             if session.status != SessionStatus::Running {
                 match session.last_summary_at {
                     Some(t) if t.elapsed() < SUMMARY_FORCE_INTERVAL => continue,
-                    _ => {}
+                    _ => {
+                        if session.forced_summary_count >= 3 {
+                            continue;
+                        }
+                        session.forced_summary_count += 1;
+                    }
                 }
             }
 
@@ -534,7 +548,17 @@ impl App {
             if lines.len() <= 3 {
                 continue;
             }
-            lines.truncate(lines.len() - 1);
+            // Ignore last 3 lines
+            lines.truncate(lines.len() - 3);
+
+            // Only keep text after the last white circle (○)
+            if let Some(pos) = lines.iter().rposition(|line| line.contains('○')) {
+                lines = lines[pos + 1..].to_vec();
+            }
+
+            if lines.is_empty() {
+                continue;
+            }
 
             let text = lines.join("\n");
 
@@ -545,8 +569,16 @@ impl App {
                     // Force refresh if last summary is older than 30s
                     match session.last_summary_at {
                         Some(t) if t.elapsed() < SUMMARY_FORCE_INTERVAL => continue,
-                        _ => {}
+                        _ => {
+                            if session.forced_summary_count >= 3 {
+                                continue;
+                            }
+                            session.forced_summary_count += 1;
+                        }
                     }
+                } else {
+                    // Meaningful content change — reset forced refresh budget
+                    session.forced_summary_count = 0;
                 }
             }
 
@@ -557,34 +589,37 @@ impl App {
             let id = session.id;
             let tx = self.event_tx.clone();
             tokio::spawn(async move {
-                let result = tokio::process::Command::new("claude")
-                    .arg("-p")
-                    .arg(format!(
-                        "Your PRIMARY task: classify what Claude is doing in this terminal session.\n\
-                         Output exactly ONE line: STATE brief_summary\n\n\
-                         STATE rules (apply first match):\n\
-                         \x20 INPUT   — Claude stopped and needs user response. Signals: question mark, \"Would you like\", \"Should I\", \"Do you want\", \"Please provide\", permission prompt, or choices listed.\n\
-                         \x20 WORKING — Claude is actively executing. Signals: tool calls, file edits, command output, reading files, compiling, testing.\n\
-                         \x20 DONE    — Claude finished and is idle. Signals: summary of work done, \"I've finished\", \"I've implemented\", \"Complete\", or idle prompt after work.\n\n\
-                         brief_summary: 3-5 words. For INPUT: what user must decide/answer. For WORKING: what Claude is doing. For DONE: what was accomplished.\n\n\
-                         Examples:\n\
-                         \x20 INPUT need database schema decision\n\
-                         \x20 WORKING running test suite\n\
-                         \x20 DONE auth module implemented\n\n\
-                         Terminal output:\n\n{}",
-                        text
-                    ))
-                    .arg("--model")
-                    .arg("haiku")
-                    .stdin(std::process::Stdio::null())
-                    .output()
-                    .await;
+                let result = tokio::time::timeout(
+                    Duration::from_secs(15),
+                    tokio::process::Command::new("claude")
+                        .arg("-p")
+                        .arg(format!(
+                            "Your PRIMARY task: classify what Claude is doing in this terminal session.\n\
+                             Output exactly ONE line: STATE brief_summary\n\n\
+                             STATE rules (apply first match):\n\
+                             \x20 INPUT   — Claude stopped and needs user response. Signals: question mark, \"Would you like\", \"Should I\", \"Do you want\", \"Please provide\", permission prompt, or choices listed.\n\
+                             \x20 WORKING — Claude is actively executing. Signals: tool calls, file edits, command output, reading files, compiling, testing.\n\
+                             \x20 DONE    — Claude finished and is idle. Signals: summary of work done, \"I've finished\", \"I've implemented\", \"Complete\", or idle prompt after work.\n\n\
+                             brief_summary: 3-5 words. For INPUT: what user must decide/answer. For WORKING: what Claude is doing. For DONE: what was accomplished.\n\n\
+                             Examples:\n\
+                             \x20 INPUT need database schema decision\n\
+                             \x20 WORKING running test suite\n\
+                             \x20 DONE auth module implemented\n\n\
+                             Terminal output:\n\n{}",
+                            text
+                        ))
+                        .arg("--model")
+                        .arg("haiku")
+                        .stdin(std::process::Stdio::null())
+                        .output(),
+                )
+                .await;
 
                 let summary = match result {
-                    Ok(output) if output.status.success() => {
+                    Ok(Ok(output)) if output.status.success() => {
                         String::from_utf8_lossy(&output.stdout).trim().to_string()
                     }
-                    _ => String::new(),
+                    _ => String::new(), // timeout or error → clears summary_pending
                 };
                 let _ = tx.send(AppEvent::SummaryResult(id, summary));
             });

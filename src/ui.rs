@@ -411,6 +411,11 @@ impl App {
                 } else {
                     Style::default()
                 };
+                let console_style = if self.selected_cli_type == CliType::Console {
+                    Style::new().bg(PASTEL_CYAN).fg(Color::Black).bold()
+                } else {
+                    Style::default()
+                };
                 (
                     " Select type (Esc to cancel) ".to_string(),
                     Style::new().fg(PASTEL_CYAN),
@@ -419,6 +424,8 @@ impl App {
                         Span::styled(" 1: 🤖 claude ", claude_style),
                         Span::raw("  "),
                         Span::styled(" 2: ⚡ amp ", amp_style),
+                        Span::raw("  "),
+                        Span::styled(" 3: >_ console ", console_style),
                         Span::styled(
                             "    ↑↓/Tab: switch  Enter: confirm",
                             Style::new().dark_gray(),
@@ -437,6 +444,8 @@ impl App {
                     Span::raw(": tab  "),
                     Span::styled("n", Style::new().fg(Color::Yellow).bold()),
                     Span::raw(": new  "),
+                    Span::styled("c", Style::new().fg(Color::Yellow).bold()),
+                    Span::raw(": console  "),
                     Span::styled("l", Style::new().fg(Color::Yellow).bold()),
                     Span::raw(": ralph  "),
                     Span::styled("e", Style::new().fg(Color::Yellow).bold()),

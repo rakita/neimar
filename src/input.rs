@@ -153,6 +153,11 @@ impl App {
                 self.input_mode = InputMode::NamingSession;
                 self.input_buffer.clear();
             }
+            KeyCode::Char('c') => {
+                self.input_mode = InputMode::NamingSession;
+                self.selected_cli_type = CliType::Console;
+                self.input_buffer.clear();
+            }
             KeyCode::Char('l') => {
                 self.input_mode = InputMode::NamingRalph;
                 self.input_buffer.clear();
@@ -293,10 +298,23 @@ impl App {
         match key.code {
             KeyCode::Enter => {
                 if !self.input_buffer.is_empty() {
-                    self.pending_session_name = Some(self.input_buffer.clone());
-                    self.input_buffer.clear();
-                    self.input_mode = InputMode::SelectingSessionType;
-                    self.selected_cli_type = CliType::Claude;
+                    if self.selected_cli_type == CliType::Console {
+                        // Console shortcut: skip type selection, create immediately
+                        let name = self.input_buffer.clone();
+                        self.input_buffer.clear();
+                        self.input_mode = InputMode::Normal;
+                        let (rows, cols) = if self.last_right_panel_size != (0, 0) {
+                            self.last_right_panel_size
+                        } else {
+                            (24, 80)
+                        };
+                        self.create_session(name, CliType::Console, rows, cols);
+                    } else {
+                        self.pending_session_name = Some(self.input_buffer.clone());
+                        self.input_buffer.clear();
+                        self.input_mode = InputMode::SelectingSessionType;
+                        self.selected_cli_type = CliType::Claude;
+                    }
                 } else {
                     self.input_mode = InputMode::Normal;
                     self.input_buffer.clear();
@@ -349,7 +367,8 @@ impl App {
             | KeyCode::Tab => {
                 self.selected_cli_type = match self.selected_cli_type {
                     CliType::Claude => CliType::Amp,
-                    CliType::Amp => CliType::Claude,
+                    CliType::Amp => CliType::Console,
+                    CliType::Console => CliType::Claude,
                 };
             }
             KeyCode::Enter => {
@@ -384,6 +403,17 @@ impl App {
                         (24, 80)
                     };
                     self.create_session(name, CliType::Amp, rows, cols);
+                }
+            }
+            KeyCode::Char('3') => {
+                if let Some(name) = self.pending_session_name.take() {
+                    self.input_mode = InputMode::Normal;
+                    let (rows, cols) = if self.last_right_panel_size != (0, 0) {
+                        self.last_right_panel_size
+                    } else {
+                        (24, 80)
+                    };
+                    self.create_session(name, CliType::Console, rows, cols);
                 }
             }
             KeyCode::Esc => {

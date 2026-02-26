@@ -113,13 +113,15 @@ impl PermissionMode {
 pub(crate) enum CliType {
     Claude,
     Amp,
+    Console,
 }
 
 impl CliType {
-    pub(crate) fn command(&self) -> &'static str {
+    pub(crate) fn command(&self) -> String {
         match self {
-            CliType::Claude => "claude",
-            CliType::Amp => "amp",
+            CliType::Claude => "claude".to_string(),
+            CliType::Amp => "amp".to_string(),
+            CliType::Console => std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string()),
         }
     }
 
@@ -128,6 +130,7 @@ impl CliType {
         match self {
             CliType::Claude => "claude",
             CliType::Amp => "amp",
+            CliType::Console => "console",
         }
     }
 }
@@ -244,6 +247,7 @@ pub(crate) struct Session {
     pub(crate) last_summary_text: String,
     pub(crate) summary_pending: bool,
     pub(crate) last_summary_at: Option<Instant>,
+    pub(crate) forced_summary_count: u32,
 }
 
 impl Session {
