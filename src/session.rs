@@ -233,6 +233,7 @@ pub(crate) struct Session {
     pub(crate) last_pty_output: Option<Instant>,
     pub(crate) scroll_offset: usize,
     pub(crate) turn_count: u32,
+    #[allow(dead_code)]
     pub(crate) ralph_loop: bool,
     pub(crate) pending_ralph_command: Option<String>,
     pub(crate) ralph_created_at: Option<Instant>,
