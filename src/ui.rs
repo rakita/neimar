@@ -1,5 +1,5 @@
 use crate::app::{App, Focus, InputMode, LeftTab};
-use crate::session::{CliType, SessionState};
+use crate::session::CliType;
 use portable_pty::PtySize;
 use ratatui::{
     Frame,
@@ -59,11 +59,7 @@ impl App {
                 let state_label = state.label().to_string();
                 let state_color = state.color();
 
-                let name_style = if state == SessionState::Archived {
-                    Style::new().dark_gray()
-                } else {
-                    Style::default()
-                };
+                let name_style = Style::default();
 
                 // Line 1: [MODE_EMOJI][STATE] name (left) + ai_state + context info (right-aligned)
                 let mode_emoji = s.permission_mode.emoji();
@@ -434,7 +430,7 @@ impl App {
                 )
             }
             _ => {
-                let mut spans = vec![
+                let spans = vec![
                     Span::styled(
                         " Shift(⇧)+Left(←)/Right(→)",
                         Style::new().fg(Color::Yellow).bold(),
@@ -452,10 +448,6 @@ impl App {
                     Span::raw(": rename  "),
                     Span::styled("r", Style::new().fg(Color::Yellow).bold()),
                     Span::raw(": remove  "),
-                    Span::styled("x", Style::new().fg(Color::Yellow).bold()),
-                    Span::raw(": archive  "),
-                    Span::styled("a", Style::new().fg(Color::Yellow).bold()),
-                    Span::raw(": toggle archived  "),
                     Span::styled("h", Style::new().fg(Color::Yellow).bold()),
                     Span::raw(": half  "),
                     Span::styled("j/k", Style::new().fg(Color::Yellow).bold()),
@@ -465,12 +457,6 @@ impl App {
                     Span::styled("Shift+PgUp/PgDn", Style::new().fg(Color::Yellow).bold()),
                     Span::raw(": scroll"),
                 ];
-                if self.show_archived {
-                    spans.push(Span::styled(
-                        "  [showing archived]",
-                        Style::new().dark_gray(),
-                    ));
-                }
                 (
                     " neimar ".to_string(),
                     Style::new().fg(PASTEL_YELLOW),

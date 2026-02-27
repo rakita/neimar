@@ -84,7 +84,6 @@ pub(crate) struct App {
     pub(crate) event_tx: mpsc::UnboundedSender<AppEvent>,
     pub(crate) should_quit: bool,
     pub(crate) next_session_id: usize,
-    pub(crate) show_archived: bool,
     pub(crate) last_status_poll: Instant,
     pub(crate) last_right_panel_size: (u16, u16),
     pub(crate) last_sessions_area: Rect,
@@ -119,7 +118,6 @@ impl App {
             event_tx,
             should_quit: false,
             next_session_id: 0,
-            show_archived: false,
             last_status_poll: Instant::now(),
             last_right_panel_size: (0, 0),
             last_sessions_area: Rect::default(),
@@ -229,7 +227,6 @@ impl App {
                     pty_writer: None,
                     child: None,
                     last_size: (rows, cols),
-                    archived: false,
                     status_file: PathBuf::new(),
                     claude_status: None,
                     status_file_mtime: None,
@@ -290,7 +287,6 @@ impl App {
                     pty_writer: None,
                     child: None,
                     last_size: (rows, cols),
-                    archived: false,
                     status_file: status_path,
                     claude_status: None,
                     status_file_mtime: None,
@@ -356,7 +352,6 @@ impl App {
             pty_writer: Some(writer),
             child: Some(child),
             last_size: (rows, cols),
-            archived: false,
             status_file: status_path,
             claude_status: None,
             status_file_mtime: None,
@@ -389,23 +384,7 @@ impl App {
 
     /// Returns real indices into `self.sessions` for sessions that should be displayed.
     pub(crate) fn visible_sessions(&self) -> Vec<usize> {
-        let mut vis: Vec<usize> = self
-            .sessions
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| !s.archived)
-            .map(|(i, _)| i)
-            .collect();
-        if self.show_archived {
-            vis.extend(
-                self.sessions
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, s)| s.archived)
-                    .map(|(i, _)| i),
-            );
-        }
-        vis
+        (0..self.sessions.len()).collect()
     }
 
     /// Map the current visible selection to a real session index.
@@ -438,7 +417,7 @@ impl App {
 
     pub(crate) fn update_pty_permission_modes(&mut self) {
         for session in &mut self.sessions {
-            if session.status != SessionStatus::Running || session.archived || session.cli_type == CliType::Console {
+            if session.status != SessionStatus::Running || session.cli_type == CliType::Console {
                 continue;
             }
             let detected = session.detect_permission_mode_from_pty();
@@ -527,7 +506,7 @@ impl App {
         const SUMMARY_FORCE_INTERVAL: Duration = Duration::from_secs(30);
 
         for session in &mut self.sessions {
-            if session.archived || session.summary_pending || session.cli_type == CliType::Console {
+            if session.summary_pending || session.cli_type == CliType::Console {
                 continue;
             }
 

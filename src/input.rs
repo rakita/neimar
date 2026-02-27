@@ -179,30 +179,6 @@ impl App {
                     }
                 }
             }
-            KeyCode::Char('x') => {
-                if let Some(real_idx) = self.selected_real_index() {
-                    // Send Ctrl+D to gracefully close claude
-                    if let Some(writer) = &mut self.sessions[real_idx].pty_writer {
-                        let _ = writer.write_all(b"\x04");
-                        let _ = writer.flush();
-                    }
-                    Self::cleanup_status_file(&self.sessions[real_idx].status_file);
-                    self.sessions[real_idx].archived = true;
-
-                    if !self.show_archived {
-                        let vis = self.visible_sessions();
-                        if vis.is_empty() {
-                            self.list_state.select(None);
-                            self.focus = Focus::Sessions;
-                        } else {
-                            let sel = self.list_state.selected().unwrap_or(0);
-                            if sel >= vis.len() {
-                                self.list_state.select(Some(vis.len() - 1));
-                            }
-                        }
-                    }
-                }
-            }
             KeyCode::Char('e') => {
                 if let Some(real_idx) = self.selected_real_index() {
                     self.input_mode = InputMode::RenamingSession;
@@ -213,15 +189,6 @@ impl App {
                 self.left_panel_half = !self.left_panel_half;
                 if !self.left_panel_half {
                     self.left_panel_width = 42;
-                }
-            }
-            KeyCode::Char('a') => {
-                self.show_archived = !self.show_archived;
-                let vis = self.visible_sessions();
-                if vis.is_empty() {
-                    self.list_state.select(None);
-                } else if let Some(sel) = self.list_state.selected() && sel >= vis.len() {
-                    self.list_state.select(Some(vis.len() - 1));
                 }
             }
             KeyCode::Left | KeyCode::Right => {

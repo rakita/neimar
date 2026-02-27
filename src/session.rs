@@ -188,7 +188,6 @@ pub(crate) enum SessionState {
     Starting,
     Done,
     Failed,
-    Archived,
 }
 
 impl SessionState {
@@ -199,7 +198,6 @@ impl SessionState {
             SessionState::Starting => "⏳",
             SessionState::Done => "🟢",
             SessionState::Failed => "🔴",
-            SessionState::Archived => "⬛",
         }
     }
 
@@ -211,7 +209,6 @@ impl SessionState {
             SessionState::Starting => Color::DarkGray,
             SessionState::Done => Color::Green,
             SessionState::Failed => Color::Red,
-            SessionState::Archived => Color::DarkGray,
         }
     }
 }
@@ -230,7 +227,6 @@ pub(crate) struct Session {
     #[allow(dead_code)]
     pub(crate) child: Option<Box<dyn Child + Send>>,
     pub(crate) last_size: (u16, u16),
-    pub(crate) archived: bool,
     pub(crate) status_file: PathBuf,
     pub(crate) claude_status: Option<ClaudeStatus>,
     pub(crate) status_file_mtime: Option<SystemTime>,
@@ -259,9 +255,6 @@ impl Session {
     }
 
     pub(crate) fn inferred_state(&self) -> SessionState {
-        if self.archived {
-            return SessionState::Archived;
-        }
         match self.status {
             SessionStatus::Completed => SessionState::Done,
             SessionStatus::Failed => SessionState::Failed,
