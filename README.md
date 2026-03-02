@@ -1,28 +1,12 @@
+<p align="center">
+  <img src="assets/logo.png" alt="Neimar Logo" width="300" />
+</p>
+
 # Neimar
 
 TUI multiplexer for managing multiple AI CLI sessions in a terminal. Run several Claude, Amp, or shell sessions side-by-side with full terminal fidelity.
 
-```
-┌─ Sessions ─────────────────┬─ claude-refactor | opus-4 | T:12 | $0.42 | 38% ──┐
-│ > 🧱 claude-refactor  WORK │                                                   │
-│   Refactoring auth module  │  ● I'll refactor the authentication module.       │
-│                            │                                                   │
-│   💬 amp-review      INPUT │  First, let me read the existing code...          │
-│   Waiting for approval     │                                                   │
-│                            │  src/auth.rs                                      │
-│   🟢 bugfix-123       DONE │  ┌──────────────────────────────────────────┐     │
-│   Fixed null pointer       │  │ pub fn authenticate(token: &str) -> bool │   ▓ │
-│                            │  │     validate(token)                      │   ░ │
-│                            │  │ }                                        │   ░ │
-│                            │  └──────────────────────────────────────────┘     │
-├─ Agents ───────────────────┤                                                   │
-│   code-reviewer            │                                                   │
-│   test-writer              │                                                   │
-└────────────────────────────┴───────────────────────────────────────────────────┘
-┌─ neimar ──────────────────────────────────────────────────────────────────────┐
-│ Shift(⇧)+←/→: panel  ←/→: tab  n: new  l: ralph  e: rename  q: quit        │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
+![Neimar](assets/console.png)
 
 ## Features
 
@@ -37,60 +21,12 @@ TUI multiplexer for managing multiple AI CLI sessions in a terminal. Run several
 - **Agents directory** — Browse and view agent definition files from a dedicated tab
 - **Ralph loop** — Automated prompt injection for iterative Claude workflows
 
-## Requirements
-
-- **Rust** (2024 edition)
-- **`claude` CLI** on PATH (for Claude sessions)
-- **`amp` CLI** on PATH (optional, for Amp sessions)
-
 ## Build & Run
 
 ```bash
 cargo build          # compile
 cargo run            # run the app
 ```
-
-## Keybindings
-
-### Session List (left panel focused)
-
-| Key | Action |
-|-----|--------|
-| `n` | Create new session |
-| `l` | Create Ralph loop session |
-| `e` | Rename selected session |
-| `r` | Remove selected session |
-| `h` | Toggle half-width left panel |
-| `j` / `↓` | Navigate down |
-| `k` / `↑` | Navigate up |
-| `←` / `→` | Switch between Sessions and Agents tabs |
-| `q` | Quit |
-
-### Terminal Panel (right panel focused)
-
-| Key | Action |
-|-----|--------|
-| Any key | Forwarded to the session's PTY |
-| `Cmd+C` | Copy selection to clipboard (when text is selected) |
-| `Esc` | Snap to bottom, clear selection (when scrolled) |
-
-### Navigation (works from either panel)
-
-| Key | Action |
-|-----|--------|
-| `Shift+←` / `Shift+→` | Switch focus between panels |
-| `Shift+PgUp` / `Shift+PgDn` | Scroll session output |
-| `Shift+↑` / `Shift+↓` | Scroll one line |
-
-### Mouse
-
-| Action | Effect |
-|--------|--------|
-| Click session | Select and focus session |
-| Click right panel | Start text selection, focus terminal |
-| Drag on divider | Resize panels |
-| Drag on right panel | Select text (auto-copied on release) |
-| Scroll wheel | Scroll session output |
 
 ## Session Types
 
@@ -120,3 +56,9 @@ When creating a new session (`n`), choose a type:
 |-------|------|---------|
 | ⏸ | Plan | Claude is in plan mode |
 | ⏩ | Edit | Claude is auto-accepting edits |
+
+## License
+
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT License](LICENSE-MIT) at your option.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in this crate by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.

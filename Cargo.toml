@@ -2,6 +2,8 @@
 name = "neimar"
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
+authors = ["Dragan Rakita <dragan0rakita@gmail.com>"]
 
 [dependencies]
 ratatui = "0.30"
