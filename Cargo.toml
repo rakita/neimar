@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 authors = ["Dragan Rakita <dragan0rakita@gmail.com>"]
+description = "TUI app for managing multiple AI bot sessions in a terminal"
+repository = "https://github.com/rakita/neimar"
 
 [dependencies]
 ratatui = "0.30"
