@@ -6,7 +6,7 @@ use ratatui::{
     layout::{Constraint, Layout, Position, Rect},
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, List, ListItem, Padding, Paragraph},
+    widgets::{Block, BorderType, List, ListItem, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 use tui_term::widget::PseudoTerminal;
 
@@ -297,6 +297,17 @@ impl App {
         // Reset scrollback so parser operates normally
         self.sessions[idx].parser.screen_mut().set_scrollback(0);
 
+        // Render scrollbar when there's scrollback content
+        let max_scroll = self.sessions[idx].max_scrollback();
+        if max_scroll > 0 {
+            let mut scrollbar_state = ScrollbarState::new(max_scroll)
+                .position(max_scroll.saturating_sub(scroll_offset));
+            let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .thumb_style(Style::new().fg(Color::DarkGray))
+                .track_style(Style::new().fg(Color::Rgb(40, 40, 40)));
+            frame.render_stateful_widget(scrollbar, inner, &mut scrollbar_state);
+        }
+
         // Render selection highlight by swapping fg/bg colors
         if let Some(sel) = &self.selection {
             let (start_row, start_col, end_row, end_col) = sel.ordered();
@@ -440,8 +451,6 @@ impl App {
                     Span::raw(": tab  "),
                     Span::styled("n", Style::new().fg(Color::Yellow).bold()),
                     Span::raw(": new  "),
-                    Span::styled("c", Style::new().fg(Color::Yellow).bold()),
-                    Span::raw(": console  "),
                     Span::styled("l", Style::new().fg(Color::Yellow).bold()),
                     Span::raw(": ralph  "),
                     Span::styled("e", Style::new().fg(Color::Yellow).bold()),

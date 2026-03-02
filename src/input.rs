@@ -121,7 +121,7 @@ impl App {
                 KeyCode::Up => {
                     self.selection = None;
                     if let Some(session) = self.selected_session_mut() {
-                        session.scroll_offset += 3;
+                        session.scroll_offset += 1;
                         session.clamp_scroll();
                     }
                     return;
@@ -129,7 +129,7 @@ impl App {
                 KeyCode::Down => {
                     self.selection = None;
                     if let Some(session) = self.selected_session_mut() {
-                        session.scroll_offset = session.scroll_offset.saturating_sub(3);
+                        session.scroll_offset = session.scroll_offset.saturating_sub(1);
                     }
                     return;
                 }
@@ -151,11 +151,6 @@ impl App {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('n') => {
                 self.input_mode = InputMode::NamingSession;
-                self.input_buffer.clear();
-            }
-            KeyCode::Char('c') => {
-                self.input_mode = InputMode::NamingSession;
-                self.selected_cli_type = CliType::Console;
                 self.input_buffer.clear();
             }
             KeyCode::Char('l') => {
@@ -265,23 +260,10 @@ impl App {
         match key.code {
             KeyCode::Enter => {
                 if !self.input_buffer.is_empty() {
-                    if self.selected_cli_type == CliType::Console {
-                        // Console shortcut: skip type selection, create immediately
-                        let name = self.input_buffer.clone();
-                        self.input_buffer.clear();
-                        self.input_mode = InputMode::Normal;
-                        let (rows, cols) = if self.last_right_panel_size != (0, 0) {
-                            self.last_right_panel_size
-                        } else {
-                            (24, 80)
-                        };
-                        self.create_session(name, CliType::Console, rows, cols);
-                    } else {
-                        self.pending_session_name = Some(self.input_buffer.clone());
-                        self.input_buffer.clear();
-                        self.input_mode = InputMode::SelectingSessionType;
-                        self.selected_cli_type = CliType::Claude;
-                    }
+                    self.pending_session_name = Some(self.input_buffer.clone());
+                    self.input_buffer.clear();
+                    self.input_mode = InputMode::SelectingSessionType;
+                    self.selected_cli_type = CliType::Claude;
                 } else {
                     self.input_mode = InputMode::Normal;
                     self.input_buffer.clear();
@@ -613,6 +595,13 @@ impl App {
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 self.dragging_divider = false;
+                // Auto-copy selection to clipboard on mouse-up if it's a real drag (not just a click)
+                if let Some(sel) = &self.selection {
+                    let (sr, sc, er, ec) = sel.ordered();
+                    if sr != er || sc != ec {
+                        self.copy_selection_to_clipboard();
+                    }
+                }
             }
             MouseEventKind::ScrollUp => {
                 self.selection = None;
@@ -623,9 +612,9 @@ impl App {
                     && event.row < area.y + area.height
                 {
                     if self.left_tab == LeftTab::Agents {
-                        self.agent_scroll_offset = self.agent_scroll_offset.saturating_add(3);
+                        self.agent_scroll_offset = self.agent_scroll_offset.saturating_add(1);
                     } else if let Some(session) = self.selected_session_mut() {
-                        session.scroll_offset += 3;
+                        session.scroll_offset += 1;
                         session.clamp_scroll();
                     }
                 }
@@ -639,9 +628,9 @@ impl App {
                     && event.row < area.y + area.height
                 {
                     if self.left_tab == LeftTab::Agents {
-                        self.agent_scroll_offset = self.agent_scroll_offset.saturating_sub(3);
+                        self.agent_scroll_offset = self.agent_scroll_offset.saturating_sub(1);
                     } else if let Some(session) = self.selected_session_mut() {
-                        session.scroll_offset = session.scroll_offset.saturating_sub(3);
+                        session.scroll_offset = session.scroll_offset.saturating_sub(1);
                     }
                 }
             }
