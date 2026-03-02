@@ -11,16 +11,20 @@ pub(crate) enum AppEvent {
 pub(crate) fn apply_event(app: &mut App, event: AppEvent) {
     match event {
         AppEvent::PtyOutput(id, bytes) => {
-            if let Some(&idx) = app.session_id_map.get(&id) {
-                if let Some(session) = app.sessions.get_mut(idx) {
-                    if session.id == id {
-                        session.parser.process(&bytes);
-                        session.last_pty_output = Some(Instant::now());
-                        let detected = Session::detect_permission_mode_from_bytes(&bytes);
-                        if detected != PermissionMode::Unknown {
-                            session.permission_mode = detected;
-                        }
-                    }
+            if let Some(&idx) = app.session_id_map.get(&id)
+                && let Some(session) = app.sessions.get_mut(idx)
+                && session.id == id
+            {
+                // New output after idle: clear stale AI state so it gets re-classified
+                if !session.is_actively_working() {
+                    session.ai_state = None;
+                    session.forced_summary_count = 0;
+                }
+                session.parser.process(&bytes);
+                session.last_pty_output = Some(Instant::now());
+                let detected = Session::detect_permission_mode_from_bytes(&bytes);
+                if detected != PermissionMode::Unknown {
+                    session.permission_mode = detected;
                 }
             }
         }

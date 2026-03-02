@@ -153,23 +153,6 @@ impl AiState {
             _ => None,
         }
     }
-
-    pub(crate) fn label(&self) -> &'static str {
-        match self {
-            AiState::Working => "WORKING",
-            AiState::Input => "INPUT",
-            AiState::Done => "DONE",
-        }
-    }
-
-    pub(crate) fn color(&self) -> ratatui::style::Color {
-        use ratatui::style::Color;
-        match self {
-            AiState::Working => Color::Yellow,
-            AiState::Input => Color::Cyan,
-            AiState::Done => Color::Green,
-        }
-    }
 }
 
 // ── Session ─────────────────────────────────────────────
@@ -209,6 +192,16 @@ impl SessionState {
             SessionState::Starting => Color::DarkGray,
             SessionState::Done => Color::Green,
             SessionState::Failed => Color::Red,
+        }
+    }
+
+    pub(crate) fn text_label(&self) -> &'static str {
+        match self {
+            SessionState::Working => "WORKING",
+            SessionState::Prompt => "INPUT",
+            SessionState::Starting => "STARTING",
+            SessionState::Done => "DONE",
+            SessionState::Failed => "FAILED",
         }
     }
 }

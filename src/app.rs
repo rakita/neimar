@@ -98,7 +98,9 @@ pub(crate) struct App {
     pub(crate) last_right_panel_inner: Rect,
     pub(crate) left_panel_width: u16,
     pub(crate) dragging_divider: bool,
+    pub(crate) dragging_scrollbar: bool,
     pub(crate) left_panel_half: bool,
+    pub(crate) copied_at: Option<Instant>,
 }
 
 impl App {
@@ -132,7 +134,9 @@ impl App {
             last_right_panel_inner: Rect::default(),
             left_panel_width: 42,
             dragging_divider: false,
+            dragging_scrollbar: false,
             left_panel_half: false,
+            copied_at: None,
         }
     }
 
@@ -142,7 +146,9 @@ impl App {
         if let Ok(entries) = std::fs::read_dir(&agents_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.is_file() && let Ok(content) = std::fs::read_to_string(&path) {
+                if path.is_file()
+                    && let Ok(content) = std::fs::read_to_string(&path)
+                {
                     let name = path
                         .file_stem()
                         .unwrap_or_default()
@@ -177,10 +183,7 @@ impl App {
         self.create_session_inner(name, CliType::Claude, rows, cols, true);
 
         // Build the ralph command to inject later
-        let escaped_prompt = config
-            .prompt
-            .replace('"', "\"\"")
-            .replace('\n', " ");
+        let escaped_prompt = config.prompt.replace('"', "\"\"").replace('\n', " ");
         let ralph_cmd = format!(
             "/ralph-loop {} --max-iterations {} --completion-promise \"{}\"",
             escaped_prompt, config.max_iterations, config.completion_promise
@@ -252,7 +255,9 @@ impl App {
                 self.rebuild_session_id_map();
                 let vis = self.visible_sessions();
                 let new_real_idx = self.sessions.len() - 1;
-                let vis_idx = vis.iter().position(|&i| i == new_real_idx)
+                let vis_idx = vis
+                    .iter()
+                    .position(|&i| i == new_real_idx)
                     .unwrap_or(vis.len().saturating_sub(1));
                 self.list_state.select(Some(vis_idx));
                 return id;
@@ -305,14 +310,16 @@ impl App {
                     last_summary_at: None,
                     forced_summary_count: 0,
                 };
-                session
-                    .parser
-                    .process(format!("Failed to spawn {}: {}\r\n", cli_type.command(), e).as_bytes());
+                session.parser.process(
+                    format!("Failed to spawn {}: {}\r\n", cli_type.command(), e).as_bytes(),
+                );
                 self.sessions.push(session);
                 self.rebuild_session_id_map();
                 let vis = self.visible_sessions();
                 let new_real_idx = self.sessions.len() - 1;
-                let vis_idx = vis.iter().position(|&i| i == new_real_idx)
+                let vis_idx = vis
+                    .iter()
+                    .position(|&i| i == new_real_idx)
                     .unwrap_or(vis.len().saturating_sub(1));
                 self.list_state.select(Some(vis_idx));
                 return id;
@@ -375,7 +382,9 @@ impl App {
         self.rebuild_session_id_map();
         let vis = self.visible_sessions();
         let new_real_idx = self.sessions.len() - 1;
-        let vis_idx = vis.iter().position(|&i| i == new_real_idx)
+        let vis_idx = vis
+            .iter()
+            .position(|&i| i == new_real_idx)
             .unwrap_or(vis.len().saturating_sub(1));
         self.list_state.select(Some(vis_idx));
         self.focus = Focus::Terminal;
@@ -445,14 +454,14 @@ impl App {
             if mtime == session.status_file_mtime {
                 continue;
             }
-            if let Ok(contents) = std::fs::read_to_string(&session.status_file) {
-                if let Ok(status) = serde_json::from_str::<ClaudeStatus>(&contents) {
-                    session.claude_status = Some(status);
-                    session.turn_count += 1;
-                    session.status_file_mtime = mtime;
-                }
-                // else: partial write, don't update mtime so we retry next poll
+            if let Ok(contents) = std::fs::read_to_string(&session.status_file)
+                && let Ok(status) = serde_json::from_str::<ClaudeStatus>(&contents)
+            {
+                session.claude_status = Some(status);
+                session.turn_count += 1;
+                session.status_file_mtime = mtime;
             }
+            // else: partial write, don't update mtime so we retry next poll
         }
 
         // Poll transcript files for permission mode
@@ -698,8 +707,10 @@ impl App {
             return;
         }
 
-        if let Ok(mut clipboard) = arboard::Clipboard::new() {
-            let _ = clipboard.set_text(text);
+        if let Ok(mut clipboard) = arboard::Clipboard::new()
+            && clipboard.set_text(text).is_ok()
+        {
+            self.copied_at = Some(Instant::now());
         }
     }
 

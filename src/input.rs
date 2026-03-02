@@ -7,7 +7,9 @@ use std::io::Write;
 // ── Key to terminal bytes ───────────────────────────────
 
 fn key_to_bytes(key: &KeyEvent) -> Vec<u8> {
-    if key.modifiers.contains(KeyModifiers::CONTROL) && let KeyCode::Char(c) = key.code {
+    if key.modifiers.contains(KeyModifiers::CONTROL)
+        && let KeyCode::Char(c) = key.code
+    {
         let c_lower = c.to_ascii_lowercase();
         if c_lower.is_ascii_lowercase() {
             return vec![c_lower as u8 - b'a' + 1];
@@ -15,7 +17,9 @@ fn key_to_bytes(key: &KeyEvent) -> Vec<u8> {
         return vec![];
     }
 
-    if key.modifiers.contains(KeyModifiers::ALT) && let KeyCode::Char(c) = key.code {
+    if key.modifiers.contains(KeyModifiers::ALT)
+        && let KeyCode::Char(c) = key.code
+    {
         let mut bytes = vec![0x1b];
         let mut buf = [0u8; 4];
         bytes.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
@@ -150,8 +154,8 @@ impl App {
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('n') => {
-                self.input_mode = InputMode::NamingSession;
-                self.input_buffer.clear();
+                self.input_mode = InputMode::SelectingSessionType;
+                self.selected_cli_type = CliType::Claude;
             }
             KeyCode::Char('l') => {
                 self.input_mode = InputMode::NamingRalph;
@@ -226,8 +230,8 @@ impl App {
             }
             KeyCode::Char('n') => {
                 self.left_tab = LeftTab::Sessions;
-                self.input_mode = InputMode::NamingSession;
-                self.input_buffer.clear();
+                self.input_mode = InputMode::SelectingSessionType;
+                self.selected_cli_type = CliType::Claude;
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 if let Some(sel) = self.agent_list_state.selected() {
@@ -260,10 +264,16 @@ impl App {
         match key.code {
             KeyCode::Enter => {
                 if !self.input_buffer.is_empty() {
-                    self.pending_session_name = Some(self.input_buffer.clone());
+                    let name = self.input_buffer.clone();
+                    let cli_type = self.selected_cli_type;
+                    self.input_mode = InputMode::Normal;
                     self.input_buffer.clear();
-                    self.input_mode = InputMode::SelectingSessionType;
-                    self.selected_cli_type = CliType::Claude;
+                    let (rows, cols) = if self.last_right_panel_size != (0, 0) {
+                        self.last_right_panel_size
+                    } else {
+                        (24, 80)
+                    };
+                    self.create_session(name, cli_type, rows, cols);
                 } else {
                     self.input_mode = InputMode::Normal;
                     self.input_buffer.clear();
@@ -321,52 +331,25 @@ impl App {
                 };
             }
             KeyCode::Enter => {
-                if let Some(name) = self.pending_session_name.take() {
-                    let cli_type = self.selected_cli_type;
-                    self.input_mode = InputMode::Normal;
-                    let (rows, cols) = if self.last_right_panel_size != (0, 0) {
-                        self.last_right_panel_size
-                    } else {
-                        (24, 80)
-                    };
-                    self.create_session(name, cli_type, rows, cols);
-                }
+                self.input_mode = InputMode::NamingSession;
+                self.input_buffer.clear();
             }
             KeyCode::Char('1') => {
-                if let Some(name) = self.pending_session_name.take() {
-                    self.input_mode = InputMode::Normal;
-                    let (rows, cols) = if self.last_right_panel_size != (0, 0) {
-                        self.last_right_panel_size
-                    } else {
-                        (24, 80)
-                    };
-                    self.create_session(name, CliType::Claude, rows, cols);
-                }
+                self.selected_cli_type = CliType::Claude;
+                self.input_mode = InputMode::NamingSession;
+                self.input_buffer.clear();
             }
             KeyCode::Char('2') => {
-                if let Some(name) = self.pending_session_name.take() {
-                    self.input_mode = InputMode::Normal;
-                    let (rows, cols) = if self.last_right_panel_size != (0, 0) {
-                        self.last_right_panel_size
-                    } else {
-                        (24, 80)
-                    };
-                    self.create_session(name, CliType::Amp, rows, cols);
-                }
+                self.selected_cli_type = CliType::Amp;
+                self.input_mode = InputMode::NamingSession;
+                self.input_buffer.clear();
             }
             KeyCode::Char('3') => {
-                if let Some(name) = self.pending_session_name.take() {
-                    self.input_mode = InputMode::Normal;
-                    let (rows, cols) = if self.last_right_panel_size != (0, 0) {
-                        self.last_right_panel_size
-                    } else {
-                        (24, 80)
-                    };
-                    self.create_session(name, CliType::Console, rows, cols);
-                }
+                self.selected_cli_type = CliType::Console;
+                self.input_mode = InputMode::NamingSession;
+                self.input_buffer.clear();
             }
             KeyCode::Esc => {
-                self.pending_session_name = None;
                 self.input_mode = InputMode::Normal;
             }
             _ => {}
@@ -442,8 +425,7 @@ impl App {
 
     fn handle_terminal_key(&mut self, key: KeyEvent) {
         // Cmd+C with active selection: copy to clipboard instead of sending to PTY
-        let is_copy = key.code == KeyCode::Char('c')
-            && key.modifiers.contains(KeyModifiers::SUPER);
+        let is_copy = key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::SUPER);
         if is_copy && self.selection.is_some() {
             self.copy_selection_to_clipboard();
             self.selection = None;
@@ -489,6 +471,28 @@ impl App {
                 {
                     self.dragging_divider = true;
                     return;
+                }
+
+                // Check if clicking on the scrollbar (rightmost column of inner panel)
+                let inner = self.last_right_panel_inner;
+                if inner.width > 0
+                    && inner.height > 1
+                    && event.column == inner.x + inner.width - 1
+                    && event.row >= inner.y
+                    && event.row < inner.y + inner.height
+                    && let Some(session) = self.selected_session_mut()
+                {
+                    let max_scroll = session.max_scrollback();
+                    if max_scroll > 0 {
+                        let y_ratio =
+                            (event.row - inner.y) as f64 / (inner.height - 1).max(1) as f64;
+                        let y_ratio = y_ratio.clamp(0.0, 1.0);
+                        session.scroll_offset =
+                            ((1.0 - y_ratio) * max_scroll as f64).round() as usize;
+                        self.dragging_scrollbar = true;
+                        self.selection = None;
+                        return;
+                    }
                 }
 
                 // Clear any existing selection on new click
@@ -578,6 +582,22 @@ impl App {
                     self.left_panel_width = event.column.clamp(min_width, max_width);
                     return;
                 }
+                // Handle scrollbar dragging
+                if self.dragging_scrollbar {
+                    let inner = self.last_right_panel_inner;
+                    if inner.height > 1 {
+                        let clamped_row = event.row.max(inner.y).min(inner.y + inner.height - 1);
+                        let y_ratio =
+                            (clamped_row - inner.y) as f64 / (inner.height - 1).max(1) as f64;
+                        let y_ratio = y_ratio.clamp(0.0, 1.0);
+                        if let Some(session) = self.selected_session_mut() {
+                            let max_scroll = session.max_scrollback();
+                            session.scroll_offset =
+                                ((1.0 - y_ratio) * max_scroll as f64).round() as usize;
+                        }
+                    }
+                    return;
+                }
                 // Update selection end point, clamped to inner rect bounds
                 if self.selection.is_some() {
                     let inner = self.last_right_panel_inner;
@@ -595,6 +615,7 @@ impl App {
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 self.dragging_divider = false;
+                self.dragging_scrollbar = false;
                 // Auto-copy selection to clipboard on mouse-up if it's a real drag (not just a click)
                 if let Some(sel) = &self.selection {
                     let (sr, sc, er, ec) = sel.ordered();

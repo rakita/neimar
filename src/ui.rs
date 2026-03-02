@@ -1,12 +1,15 @@
 use crate::app::{App, Focus, InputMode, LeftTab};
-use crate::session::CliType;
+use crate::session::{CliType, SessionState};
 use portable_pty::PtySize;
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Position, Rect},
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, List, ListItem, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{
+        Block, BorderType, List, ListItem, Padding, Paragraph, Scrollbar, ScrollbarOrientation,
+        ScrollbarState,
+    },
 };
 use tui_term::widget::PseudoTerminal;
 
@@ -24,9 +27,11 @@ impl App {
             self.left_panel_width = frame.area().width / 2;
         }
 
-        let [left_area, right_area] =
-            Layout::horizontal([Constraint::Length(self.left_panel_width), Constraint::Fill(1)])
-                .areas(main_area);
+        let [left_area, right_area] = Layout::horizontal([
+            Constraint::Length(self.left_panel_width),
+            Constraint::Fill(1),
+        ])
+        .areas(main_area);
 
         self.last_sessions_area = left_area;
         match self.left_tab {
@@ -63,12 +68,19 @@ impl App {
 
                 // Line 1: [MODE_EMOJI][STATE] name (left) + ai_state + context info (right-aligned)
                 let mode_emoji = s.permission_mode.emoji();
-                let state_width = mode_emoji.len() + state_label.len() + 1 + if mode_emoji.is_empty() { 0 } else { 1 }; // +1 for space, +1 for gap after mode emoji
+                let state_width = mode_emoji.len()
+                    + state_label.len()
+                    + 1
+                    + if mode_emoji.is_empty() { 0 } else { 1 }; // +1 for space, +1 for gap after mode emoji
                 let display_name: String = s.name.clone();
 
                 // Build right-side components: AI state label + metadata
-                let ai_label = s.ai_state.map(|a| a.label().to_string());
-                let ai_color = s.ai_state.map(|a| a.color());
+                let ai_label = if s.ai_state.is_some() || !matches!(state, SessionState::Starting) {
+                    Some(state.text_label().to_string())
+                } else {
+                    None
+                };
+                let ai_color = ai_label.as_ref().map(|_| state.color());
                 let metadata_text = if let Some(ref cs) = s.claude_status {
                     let pct = cs.context_window.used_percentage as u32;
                     let turn_str = format!("T:{}", s.turn_count);
@@ -105,12 +117,21 @@ impl App {
                     Span::raw(" ".repeat(pad1)),
                 ]);
                 if let Some(ref ai) = ai_label {
-                    line1_spans.push(Span::styled(ai.clone(), Style::new().fg(ai_color.unwrap()).bold()));
+                    line1_spans.push(Span::styled(
+                        ai.clone(),
+                        Style::new().fg(ai_color.unwrap()).bold(),
+                    ));
                     if !metadata_text.is_empty() {
-                        line1_spans.push(Span::styled(format!(" {}", metadata_text), Style::new().fg(Color::DarkGray)));
+                        line1_spans.push(Span::styled(
+                            format!(" {}", metadata_text),
+                            Style::new().fg(Color::DarkGray),
+                        ));
                     }
                 } else if !metadata_text.is_empty() {
-                    line1_spans.push(Span::styled(metadata_text, Style::new().fg(Color::DarkGray)));
+                    line1_spans.push(Span::styled(
+                        metadata_text,
+                        Style::new().fg(Color::DarkGray),
+                    ));
                 }
                 let line1 = Line::from(line1_spans);
 
@@ -300,8 +321,8 @@ impl App {
         // Render scrollbar when there's scrollback content
         let max_scroll = self.sessions[idx].max_scrollback();
         if max_scroll > 0 {
-            let mut scrollbar_state = ScrollbarState::new(max_scroll)
-                .position(max_scroll.saturating_sub(scroll_offset));
+            let mut scrollbar_state =
+                ScrollbarState::new(max_scroll).position(max_scroll.saturating_sub(scroll_offset));
             let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
                 .thumb_style(Style::new().fg(Color::DarkGray))
                 .track_style(Style::new().fg(Color::Rgb(40, 40, 40)));
@@ -329,10 +350,10 @@ impl App {
                         break;
                     }
                     let cell = &mut buf[(screen_x, screen_y)];
-                    let fg = cell.fg;
-                    let bg = cell.bg;
-                    cell.set_fg(bg);
-                    cell.set_bg(fg);
+                    cell.set_bg(Color::Rgb(50, 50, 150));
+                    if cell.fg == Color::Reset {
+                        cell.set_fg(Color::White);
+                    }
                 }
             }
         }
@@ -441,35 +462,46 @@ impl App {
                 )
             }
             _ => {
-                let spans = vec![
-                    Span::styled(
-                        " Shift(⇧)+Left(←)/Right(→)",
-                        Style::new().fg(Color::Yellow).bold(),
-                    ),
-                    Span::raw(": panel  "),
-                    Span::styled("←/→", Style::new().fg(Color::Yellow).bold()),
-                    Span::raw(": tab  "),
-                    Span::styled("n", Style::new().fg(Color::Yellow).bold()),
-                    Span::raw(": new  "),
-                    Span::styled("l", Style::new().fg(Color::Yellow).bold()),
-                    Span::raw(": ralph  "),
-                    Span::styled("e", Style::new().fg(Color::Yellow).bold()),
-                    Span::raw(": rename  "),
-                    Span::styled("r", Style::new().fg(Color::Yellow).bold()),
-                    Span::raw(": remove  "),
-                    Span::styled("h", Style::new().fg(Color::Yellow).bold()),
-                    Span::raw(": half  "),
-                    Span::styled("j/k", Style::new().fg(Color::Yellow).bold()),
-                    Span::raw(": navigate  "),
-                    Span::styled("q", Style::new().fg(Color::Yellow).bold()),
-                    Span::raw(": quit  "),
-                    Span::styled("Shift+PgUp/PgDn", Style::new().fg(Color::Yellow).bold()),
-                    Span::raw(": scroll"),
-                ];
+                let show_copied = self
+                    .copied_at
+                    .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(2));
+
+                let content = if show_copied {
+                    Line::from(Span::styled(
+                        " Copied to clipboard!",
+                        Style::new().fg(Color::Green).bold(),
+                    ))
+                } else {
+                    Line::from(vec![
+                        Span::styled(
+                            " Shift(⇧)+Left(←)/Right(→)",
+                            Style::new().fg(Color::Yellow).bold(),
+                        ),
+                        Span::raw(": panel  "),
+                        Span::styled("←/→", Style::new().fg(Color::Yellow).bold()),
+                        Span::raw(": tab  "),
+                        Span::styled("n", Style::new().fg(Color::Yellow).bold()),
+                        Span::raw(": new  "),
+                        Span::styled("l", Style::new().fg(Color::Yellow).bold()),
+                        Span::raw(": ralph  "),
+                        Span::styled("e", Style::new().fg(Color::Yellow).bold()),
+                        Span::raw(": rename  "),
+                        Span::styled("r", Style::new().fg(Color::Yellow).bold()),
+                        Span::raw(": remove  "),
+                        Span::styled("h", Style::new().fg(Color::Yellow).bold()),
+                        Span::raw(": half  "),
+                        Span::styled("j/k", Style::new().fg(Color::Yellow).bold()),
+                        Span::raw(": navigate  "),
+                        Span::styled("q", Style::new().fg(Color::Yellow).bold()),
+                        Span::raw(": quit  "),
+                        Span::styled("Shift+PgUp/PgDn", Style::new().fg(Color::Yellow).bold()),
+                        Span::raw(": scroll"),
+                    ])
+                };
                 (
                     " neimar ".to_string(),
                     Style::new().fg(PASTEL_YELLOW),
-                    Line::from(spans),
+                    content,
                 )
             }
         };
