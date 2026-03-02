@@ -99,6 +99,7 @@ pub(crate) struct App {
     pub(crate) left_panel_width: u16,
     pub(crate) dragging_divider: bool,
     pub(crate) dragging_scrollbar: bool,
+    pub(crate) dragging_sessions_scrollbar: bool,
     pub(crate) left_panel_half: bool,
     pub(crate) copied_at: Option<Instant>,
 }
@@ -135,6 +136,7 @@ impl App {
             left_panel_width: 42,
             dragging_divider: false,
             dragging_scrollbar: false,
+            dragging_sessions_scrollbar: false,
             left_panel_half: false,
             copied_at: None,
         }
@@ -241,12 +243,6 @@ impl App {
                     ralph_created_at: None,
                     permission_mode: PermissionMode::Unknown,
                     transcript_mtime: None,
-                    ai_state: None,
-                    summary: None,
-                    last_summary_text: String::new(),
-                    summary_pending: false,
-                    last_summary_at: None,
-                    forced_summary_count: 0,
                 };
                 session
                     .parser
@@ -303,12 +299,6 @@ impl App {
                     ralph_created_at: None,
                     permission_mode: PermissionMode::Unknown,
                     transcript_mtime: None,
-                    ai_state: None,
-                    summary: None,
-                    last_summary_text: String::new(),
-                    summary_pending: false,
-                    last_summary_at: None,
-                    forced_summary_count: 0,
                 };
                 session.parser.process(
                     format!("Failed to spawn {}: {}\r\n", cli_type.command(), e).as_bytes(),
@@ -370,12 +360,6 @@ impl App {
             ralph_created_at: None,
             permission_mode: PermissionMode::Unknown,
             transcript_mtime: None,
-            ai_state: None,
-            summary: None,
-            last_summary_text: String::new(),
-            summary_pending: false,
-            last_summary_at: None,
-            forced_summary_count: 0,
         };
 
         self.sessions.push(session);
@@ -421,18 +405,6 @@ impl App {
     pub(crate) fn cleanup_all_status_files(&self) {
         for session in &self.sessions {
             Self::cleanup_status_file(&session.status_file);
-        }
-    }
-
-    pub(crate) fn update_pty_permission_modes(&mut self) {
-        for session in &mut self.sessions {
-            if session.status != SessionStatus::Running || session.cli_type == CliType::Console {
-                continue;
-            }
-            let detected = session.detect_permission_mode_from_pty();
-            if detected != PermissionMode::Unknown {
-                session.permission_mode = detected;
-            }
         }
     }
 
@@ -506,112 +478,6 @@ impl App {
             }
         }
 
-        self.poll_summaries();
-    }
-
-    // ── Summary polling ─────────────────────────────────
-
-    pub(crate) fn poll_summaries(&mut self) {
-        const SUMMARY_FORCE_INTERVAL: Duration = Duration::from_secs(30);
-
-        for session in &mut self.sessions {
-            if session.summary_pending || session.cli_type == CliType::Console {
-                continue;
-            }
-
-            // Completed sessions: allow one final summary if stale, then skip
-            if session.status != SessionStatus::Running {
-                match session.last_summary_at {
-                    Some(t) if t.elapsed() < SUMMARY_FORCE_INTERVAL => continue,
-                    _ => {
-                        if session.forced_summary_count >= 3 {
-                            continue;
-                        }
-                        session.forced_summary_count += 1;
-                    }
-                }
-            }
-
-            let mut lines = session.last_n_lines(100);
-            if lines.len() <= 3 {
-                continue;
-            }
-            // Ignore last 3 lines
-            lines.truncate(lines.len() - 3);
-
-            // Only keep text after the last white circle (○)
-            if let Some(pos) = lines.iter().rposition(|line| line.contains('○')) {
-                lines = lines[pos + 1..].to_vec();
-            }
-
-            if lines.is_empty() {
-                continue;
-            }
-
-            let text = lines.join("\n");
-
-            // Check if enough has changed, with a time-based override
-            if !session.last_summary_text.is_empty() {
-                let diff_ratio = text_diff_ratio(&session.last_summary_text, &text);
-                if diff_ratio <= 0.15 {
-                    // Force refresh if last summary is older than 30s
-                    match session.last_summary_at {
-                        Some(t) if t.elapsed() < SUMMARY_FORCE_INTERVAL => continue,
-                        _ => {
-                            if session.forced_summary_count >= 3 {
-                                continue;
-                            }
-                            session.forced_summary_count += 1;
-                        }
-                    }
-                } else {
-                    // Meaningful content change — reset forced refresh budget
-                    session.forced_summary_count = 0;
-                }
-            }
-
-            session.last_summary_text = text.clone();
-            session.summary_pending = true;
-            session.last_summary_at = Some(Instant::now());
-
-            let id = session.id;
-            let tx = self.event_tx.clone();
-            tokio::spawn(async move {
-                let result = tokio::time::timeout(
-                    Duration::from_secs(15),
-                    tokio::process::Command::new("claude")
-                        .arg("-p")
-                        .arg(format!(
-                            "Your PRIMARY task: classify what Claude is doing in this terminal session.\n\
-                             Output exactly ONE line: STATE brief_summary\n\n\
-                             STATE rules (apply first match):\n\
-                             \x20 INPUT   — Claude stopped and needs user response. Signals: question mark, \"Would you like\", \"Should I\", \"Do you want\", \"Please provide\", permission prompt, or choices listed.\n\
-                             \x20 WORKING — Claude is actively executing. Signals: tool calls, file edits, command output, reading files, compiling, testing.\n\
-                             \x20 DONE    — Claude finished and is idle. Signals: summary of work done, \"I've finished\", \"I've implemented\", \"Complete\", or idle prompt after work.\n\n\
-                             brief_summary: 3-5 words. For INPUT: what user must decide/answer. For WORKING: what Claude is doing. For DONE: what was accomplished.\n\n\
-                             Examples:\n\
-                             \x20 INPUT need database schema decision\n\
-                             \x20 WORKING running test suite\n\
-                             \x20 DONE auth module implemented\n\n\
-                             Terminal output:\n\n{}",
-                            text
-                        ))
-                        .arg("--model")
-                        .arg("haiku")
-                        .stdin(std::process::Stdio::null())
-                        .output(),
-                )
-                .await;
-
-                let summary = match result {
-                    Ok(Ok(output)) if output.status.success() => {
-                        String::from_utf8_lossy(&output.stdout).trim().to_string()
-                    }
-                    _ => String::new(), // timeout or error → clears summary_pending
-                };
-                let _ = tx.send(AppEvent::SummaryResult(id, summary));
-            });
-        }
     }
 
     // ── Ralph command injection ──────────────────────────
@@ -733,17 +599,6 @@ impl App {
         }
         self.cleanup_all_status_files();
     }
-}
-
-fn text_diff_ratio(old: &str, new: &str) -> f64 {
-    let old_lines: Vec<&str> = old.lines().collect();
-    let new_lines: Vec<&str> = new.lines().collect();
-    let total = old_lines.len().max(new_lines.len());
-    if total == 0 {
-        return 0.0;
-    }
-    let common = old_lines.iter().filter(|l| new_lines.contains(l)).count();
-    1.0 - (common as f64 / total as f64)
 }
 
 fn extract_permission_mode(line: &str) -> Option<PermissionMode> {

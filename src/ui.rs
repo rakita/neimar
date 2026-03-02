@@ -75,7 +75,7 @@ impl App {
                 let display_name: String = s.name.clone();
 
                 // Build right-side components: AI state label + metadata
-                let ai_label = if s.ai_state.is_some() || !matches!(state, SessionState::Starting) {
+                let ai_label = if !matches!(state, SessionState::Starting) {
                     Some(state.text_label().to_string())
                 } else {
                     None
@@ -135,21 +135,7 @@ impl App {
                 }
                 let line1 = Line::from(line1_spans);
 
-                // Line 2: summary text only
-                let line2 = if let Some(ref summary) = s.summary {
-                    let max_len = inner_width.saturating_sub(1);
-                    let display: String = summary.chars().take(max_len).collect();
-                    Line::from(vec![
-                        Span::raw(" "),
-                        Span::styled(display, Style::new().fg(Color::White)),
-                    ])
-                } else if s.summary_pending {
-                    Line::from(Span::styled(" ...", Style::new().fg(Color::White)))
-                } else {
-                    Line::from(Span::raw(""))
-                };
-
-                ListItem::new(vec![line1, line2])
+                ListItem::new(vec![line1])
             })
             .collect();
 
@@ -170,6 +156,18 @@ impl App {
             .highlight_symbol("> ");
 
         frame.render_stateful_widget(list, area, &mut self.list_state);
+
+        // Render scrollbar when sessions overflow the visible area
+        let inner_height = area.height.saturating_sub(2) as usize; // minus top/bottom border
+        if vis.len() > inner_height && inner_height > 0 {
+            let inner = area.inner(ratatui::layout::Margin::new(1, 1));
+            let mut scrollbar_state = ScrollbarState::new(vis.len())
+                .position(self.list_state.offset());
+            let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .thumb_style(Style::new().fg(Color::DarkGray))
+                .track_style(Style::new().fg(Color::Rgb(40, 40, 40)));
+            frame.render_stateful_widget(scrollbar, inner, &mut scrollbar_state);
+        }
     }
 
     fn render_agents(&mut self, frame: &mut Frame, area: Rect) {
@@ -477,7 +475,7 @@ impl App {
                             " Shift(⇧)+Left(←)/Right(→)",
                             Style::new().fg(Color::Yellow).bold(),
                         ),
-                        Span::raw(": panel  "),
+                        Span::raw(": switch panel  "),
                         Span::styled("←/→", Style::new().fg(Color::Yellow).bold()),
                         Span::raw(": tab  "),
                         Span::styled("n", Style::new().fg(Color::Yellow).bold()),
@@ -490,12 +488,8 @@ impl App {
                         Span::raw(": remove  "),
                         Span::styled("h", Style::new().fg(Color::Yellow).bold()),
                         Span::raw(": half  "),
-                        Span::styled("j/k", Style::new().fg(Color::Yellow).bold()),
-                        Span::raw(": navigate  "),
                         Span::styled("q", Style::new().fg(Color::Yellow).bold()),
-                        Span::raw(": quit  "),
-                        Span::styled("Shift+PgUp/PgDn", Style::new().fg(Color::Yellow).bold()),
-                        Span::raw(": scroll"),
+                        Span::raw(": quit"),
                     ])
                 };
                 (

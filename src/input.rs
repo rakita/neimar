@@ -122,24 +122,10 @@ impl App {
                     }
                     return;
                 }
-                KeyCode::Up => {
-                    self.selection = None;
-                    if let Some(session) = self.selected_session_mut() {
-                        session.scroll_offset += 1;
-                        session.clamp_scroll();
-                    }
-                    return;
-                }
-                KeyCode::Down => {
-                    self.selection = None;
-                    if let Some(session) = self.selected_session_mut() {
-                        session.scroll_offset = session.scroll_offset.saturating_sub(1);
-                    }
-                    return;
-                }
                 _ => {}
             }
         }
+
 
         match self.focus {
             Focus::Sessions => match self.left_tab {
@@ -194,7 +180,7 @@ impl App {
                 self.left_tab = LeftTab::Agents;
                 self.agent_scroll_offset = 0;
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up => {
                 self.selection = None;
                 let vis = self.visible_sessions();
                 if let Some(sel) = self.list_state.selected() {
@@ -205,7 +191,7 @@ impl App {
                     }
                 }
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            KeyCode::Down => {
                 self.selection = None;
                 let vis = self.visible_sessions();
                 if let Some(sel) = self.list_state.selected() {
@@ -233,7 +219,7 @@ impl App {
                 self.input_mode = InputMode::SelectingSessionType;
                 self.selected_cli_type = CliType::Claude;
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up => {
                 if let Some(sel) = self.agent_list_state.selected() {
                     if sel > 0 {
                         self.agent_list_state.select(Some(sel - 1));
@@ -243,7 +229,7 @@ impl App {
                     self.agent_scroll_offset = 0;
                 }
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            KeyCode::Down => {
                 if let Some(sel) = self.agent_list_state.selected() {
                     if sel + 1 < self.agents.len() {
                         self.agent_list_state.select(Some(sel + 1));
@@ -321,8 +307,6 @@ impl App {
             | KeyCode::Down
             | KeyCode::Left
             | KeyCode::Right
-            | KeyCode::Char('j')
-            | KeyCode::Char('k')
             | KeyCode::Tab => {
                 self.selected_cli_type = match self.selected_cli_type {
                     CliType::Claude => CliType::Amp,
@@ -495,6 +479,28 @@ impl App {
                     }
                 }
 
+                // Check if clicking on the sessions scrollbar (rightmost column of sessions inner area)
+                if self.left_tab == LeftTab::Sessions {
+                    let sess_inner = self.last_sessions_area.inner(ratatui::layout::Margin::new(1, 1));
+                    let vis = self.visible_sessions();
+                    if sess_inner.width > 0
+                        && sess_inner.height > 1
+                        && vis.len() > sess_inner.height as usize
+                        && event.column == sess_inner.x + sess_inner.width - 1
+                        && event.row >= sess_inner.y
+                        && event.row < sess_inner.y + sess_inner.height
+                    {
+                        let y_ratio = (event.row - sess_inner.y) as f64
+                            / (sess_inner.height - 1).max(1) as f64;
+                        let y_ratio = y_ratio.clamp(0.0, 1.0);
+                        let target = (y_ratio * (vis.len() - 1) as f64).round() as usize;
+                        self.list_state.select(Some(target.min(vis.len() - 1)));
+                        self.dragging_sessions_scrollbar = true;
+                        self.selection = None;
+                        return;
+                    }
+                }
+
                 // Clear any existing selection on new click
                 self.selection = None;
 
@@ -582,6 +588,20 @@ impl App {
                     self.left_panel_width = event.column.clamp(min_width, max_width);
                     return;
                 }
+                // Handle sessions scrollbar dragging
+                if self.dragging_sessions_scrollbar {
+                    let sess_inner = self.last_sessions_area.inner(ratatui::layout::Margin::new(1, 1));
+                    let vis = self.visible_sessions();
+                    if sess_inner.height > 1 && !vis.is_empty() {
+                        let clamped_row = event.row.max(sess_inner.y).min(sess_inner.y + sess_inner.height - 1);
+                        let y_ratio = (clamped_row - sess_inner.y) as f64
+                            / (sess_inner.height - 1).max(1) as f64;
+                        let y_ratio = y_ratio.clamp(0.0, 1.0);
+                        let target = (y_ratio * (vis.len() - 1) as f64).round() as usize;
+                        self.list_state.select(Some(target.min(vis.len() - 1)));
+                    }
+                    return;
+                }
                 // Handle scrollbar dragging
                 if self.dragging_scrollbar {
                     let inner = self.last_right_panel_inner;
@@ -616,6 +636,7 @@ impl App {
             MouseEventKind::Up(MouseButton::Left) => {
                 self.dragging_divider = false;
                 self.dragging_scrollbar = false;
+                self.dragging_sessions_scrollbar = false;
                 // Auto-copy selection to clipboard on mouse-up if it's a real drag (not just a click)
                 if let Some(sel) = &self.selection {
                     let (sr, sc, er, ec) = sel.ordered();
@@ -626,11 +647,24 @@ impl App {
             }
             MouseEventKind::ScrollUp => {
                 self.selection = None;
-                let area = self.last_right_panel_area;
-                if event.column >= area.x
-                    && event.column < area.x + area.width
-                    && event.row >= area.y
-                    && event.row < area.y + area.height
+                let larea = self.last_sessions_area;
+                let rarea = self.last_right_panel_area;
+                if event.column >= larea.x
+                    && event.column < larea.x + larea.width
+                    && event.row >= larea.y
+                    && event.row < larea.y + larea.height
+                    && self.left_tab == LeftTab::Sessions
+                {
+                    // Move selection up (which auto-scrolls the list viewport)
+                    if let Some(sel) = self.list_state.selected() {
+                        if sel > 0 {
+                            self.list_state.select(Some(sel - 1));
+                        }
+                    }
+                } else if event.column >= rarea.x
+                    && event.column < rarea.x + rarea.width
+                    && event.row >= rarea.y
+                    && event.row < rarea.y + rarea.height
                 {
                     if self.left_tab == LeftTab::Agents {
                         self.agent_scroll_offset = self.agent_scroll_offset.saturating_add(1);
@@ -642,11 +676,25 @@ impl App {
             }
             MouseEventKind::ScrollDown => {
                 self.selection = None;
-                let area = self.last_right_panel_area;
-                if event.column >= area.x
-                    && event.column < area.x + area.width
-                    && event.row >= area.y
-                    && event.row < area.y + area.height
+                let larea = self.last_sessions_area;
+                let rarea = self.last_right_panel_area;
+                if event.column >= larea.x
+                    && event.column < larea.x + larea.width
+                    && event.row >= larea.y
+                    && event.row < larea.y + larea.height
+                    && self.left_tab == LeftTab::Sessions
+                {
+                    // Move selection down (which auto-scrolls the list viewport)
+                    let vis = self.visible_sessions();
+                    if let Some(sel) = self.list_state.selected() {
+                        if sel + 1 < vis.len() {
+                            self.list_state.select(Some(sel + 1));
+                        }
+                    }
+                } else if event.column >= rarea.x
+                    && event.column < rarea.x + rarea.width
+                    && event.row >= rarea.y
+                    && event.row < rarea.y + rarea.height
                 {
                     if self.left_tab == LeftTab::Agents {
                         self.agent_scroll_offset = self.agent_scroll_offset.saturating_sub(1);

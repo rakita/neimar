@@ -7,7 +7,7 @@ use std::time::{Duration, Instant, SystemTime};
 pub(crate) const IDLE_THRESHOLD: Duration = Duration::from_millis(1500);
 pub(crate) const STATUS_POLL_INTERVAL: Duration = Duration::from_secs(2);
 pub(crate) const MAX_PTY_EVENTS_PER_FRAME: usize = 500;
-pub(crate) const SESSION_ITEM_HEIGHT: usize = 2;
+pub(crate) const SESSION_ITEM_HEIGHT: usize = 1;
 
 // ── Claude Status (from statusline) ─────────────────────
 
@@ -135,26 +135,6 @@ impl CliType {
     }
 }
 
-// ── AI State (from LLM classification) ─────────────────
-
-#[derive(Clone, Copy, PartialEq)]
-pub(crate) enum AiState {
-    Working,
-    Input,
-    Done,
-}
-
-impl AiState {
-    pub(crate) fn parse(word: &str) -> Option<Self> {
-        match word {
-            "WORKING" => Some(AiState::Working),
-            "INPUT" => Some(AiState::Input),
-            "DONE" => Some(AiState::Done),
-            _ => None,
-        }
-    }
-}
-
 // ── Session ─────────────────────────────────────────────
 
 #[derive(Clone, PartialEq)]
@@ -167,9 +147,11 @@ pub(crate) enum SessionStatus {
 #[derive(Clone, PartialEq)]
 pub(crate) enum SessionState {
     Working,
-    Prompt,
-    Starting,
+    Input,
+    Planned,
     Done,
+    Starting,
+    Closed,
     Failed,
 }
 
@@ -177,9 +159,11 @@ impl SessionState {
     pub(crate) fn label(&self) -> &'static str {
         match self {
             SessionState::Working => "🧱",
-            SessionState::Prompt => "💬",
-            SessionState::Starting => "⏳",
+            SessionState::Input => "💬",
+            SessionState::Planned => "📋",
             SessionState::Done => "🟢",
+            SessionState::Starting => "⏳",
+            SessionState::Closed => "🔒",
             SessionState::Failed => "🔴",
         }
     }
@@ -188,9 +172,11 @@ impl SessionState {
         use ratatui::style::Color;
         match self {
             SessionState::Working => Color::Yellow,
-            SessionState::Prompt => Color::Cyan,
-            SessionState::Starting => Color::DarkGray,
+            SessionState::Input => Color::Cyan,
+            SessionState::Planned => Color::Magenta,
             SessionState::Done => Color::Green,
+            SessionState::Starting => Color::DarkGray,
+            SessionState::Closed => Color::DarkGray,
             SessionState::Failed => Color::Red,
         }
     }
@@ -198,9 +184,11 @@ impl SessionState {
     pub(crate) fn text_label(&self) -> &'static str {
         match self {
             SessionState::Working => "WORKING",
-            SessionState::Prompt => "INPUT",
-            SessionState::Starting => "STARTING",
+            SessionState::Input => "INPUT",
+            SessionState::Planned => "PLANNED",
             SessionState::Done => "DONE",
+            SessionState::Starting => "STARTING",
+            SessionState::Closed => "CLOSED",
             SessionState::Failed => "FAILED",
         }
     }
@@ -232,12 +220,6 @@ pub(crate) struct Session {
     pub(crate) ralph_created_at: Option<Instant>,
     pub(crate) permission_mode: PermissionMode,
     pub(crate) transcript_mtime: Option<SystemTime>,
-    pub(crate) ai_state: Option<AiState>,
-    pub(crate) summary: Option<String>,
-    pub(crate) last_summary_text: String,
-    pub(crate) summary_pending: bool,
-    pub(crate) last_summary_at: Option<Instant>,
-    pub(crate) forced_summary_count: u32,
 }
 
 impl Session {
@@ -248,78 +230,51 @@ impl Session {
         }
     }
 
+    pub(crate) fn is_showing_plan_prompt(&self) -> bool {
+        let screen = self.parser.screen();
+        let contents = screen.contents();
+        contents.contains("Claude has written up a plan and is ready to execute. Would you like to proceed?")
+    }
+
+    pub(crate) fn is_waiting_for_input(&self) -> bool {
+        let screen = self.parser.screen();
+        let contents = screen.contents();
+
+        // Check for AskUserQuestion picker
+        if contents.contains("Enter to select") && contents.contains("to navigate") {
+            return true;
+        }
+
+        // Check for permission prompt
+        if contents.contains("Allow Claude") || contents.contains("Allow Amp") {
+            return true;
+        }
+
+        // Check for regular REPL prompt: last non-empty line ends with '>'
+        contents
+            .lines()
+            .rev()
+            .find(|line| !line.trim().is_empty())
+            .is_some_and(|line| line.trim_end().ends_with('>'))
+    }
+
     pub(crate) fn inferred_state(&self) -> SessionState {
         match self.status {
-            SessionStatus::Completed => SessionState::Done,
+            SessionStatus::Completed => SessionState::Closed,
             SessionStatus::Failed => SessionState::Failed,
             SessionStatus::Running => {
                 if self.is_actively_working() {
-                    return SessionState::Working; // real-time PTY activity = definitively working
-                }
-                if let Some(ai) = self.ai_state {
-                    match ai {
-                        AiState::Working => SessionState::Working,
-                        AiState::Input => SessionState::Prompt,
-                        AiState::Done => SessionState::Done,
-                    }
-                } else if self.last_pty_output.is_some() {
-                    SessionState::Prompt
-                } else {
+                    SessionState::Working
+                } else if self.last_pty_output.is_none() {
                     SessionState::Starting
-                }
-            }
-        }
-    }
-
-    pub(crate) fn last_n_lines(&mut self, n: usize) -> Vec<String> {
-        // Enable full scrollback so we can read beyond the visible screen
-        self.parser.screen_mut().set_scrollback(usize::MAX);
-        let screen = self.parser.screen();
-        let scrollback = screen.scrollback();
-        let (rows, cols) = screen.size();
-        let total_rows = rows as usize + scrollback;
-        let all_rows: Vec<String> = screen.rows(0, cols).take(total_rows).collect();
-        // Reset scrollback
-        self.parser.screen_mut().set_scrollback(0);
-        let mut result: Vec<String> = all_rows
-            .iter()
-            .rev()
-            .filter_map(|line| {
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    None
+                } else if self.cli_type != CliType::Console && self.is_showing_plan_prompt() {
+                    SessionState::Planned
+                } else if self.cli_type != CliType::Console && self.is_waiting_for_input() {
+                    SessionState::Input
                 } else {
-                    Some(trimmed.to_string())
+                    SessionState::Done
                 }
-            })
-            .take(n)
-            .collect();
-        result.reverse();
-        result
-    }
-
-    pub(crate) fn detect_permission_mode_from_pty(&mut self) -> PermissionMode {
-        let lines = self.last_n_lines(3);
-        for line in &lines {
-            let lower = line.to_lowercase();
-            if lower.contains("plan mode") {
-                return PermissionMode::Plan;
             }
-            if lower.contains("auto-accept") || lower.contains("accept edits") {
-                return PermissionMode::AcceptEdits;
-            }
-        }
-        PermissionMode::Unknown
-    }
-
-    pub(crate) fn detect_permission_mode_from_bytes(bytes: &[u8]) -> PermissionMode {
-        let text = String::from_utf8_lossy(bytes).to_lowercase();
-        if text.contains("plan mode") {
-            PermissionMode::Plan
-        } else if text.contains("auto-accept") || text.contains("accept edits") {
-            PermissionMode::AcceptEdits
-        } else {
-            PermissionMode::Unknown
         }
     }
 

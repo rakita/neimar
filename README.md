@@ -6,6 +6,8 @@
 
 TUI multiplexer for managing multiple AI CLI sessions in a terminal. Run several Claude, Amp, or shell sessions side-by-side with full terminal fidelity.
 
+The name *neimar* is a Serbian word meaning "builder" or "master builder" — fitting for a tool that helps you build things with AI.
+
 ![Neimar](assets/console.png)
 
 ## Features
@@ -28,6 +30,27 @@ cargo build          # compile
 cargo run            # run the app
 ```
 
+## Status Indicators
+
+### Session State
+
+| Emoji | State | Meaning |
+|-------|-------|---------|
+| 🧱 | Working | Session is actively producing output |
+| 💬 | Input | Waiting for user input |
+| 📋 | Planned | Plan prompt shown, awaiting approval |
+| 🟢 | Done | Session is idle |
+| ⏳ | Starting | Session just started |
+| 🔒 | Closed | Session exited normally |
+| 🔴 | Failed | Session failed to start |
+
+### Permission Mode (Claude sessions)
+
+| Emoji | Mode | Meaning |
+|-------|------|---------|
+| ⏸ | Plan | Claude is in plan mode |
+| ⏩ | Edit | Claude is auto-accepting edits |
+
 ## Session Types
 
 When creating a new session (`n`), choose a type:
@@ -37,25 +60,6 @@ When creating a new session (`n`), choose a type:
 | 1 | Claude | 🤖 | Claude CLI session |
 | 2 | Amp | ⚡ | Amp CLI session |
 | 3 | Console | >_ | Plain shell session |
-
-## Status Indicators
-
-### Session State
-
-| Emoji | State | Meaning |
-|-------|-------|---------|
-| 🧱 | Working | Session is actively producing output |
-| 💬 | Prompt | Waiting for user input |
-| ⏳ | Starting | Session just started |
-| 🟢 | Done | Session completed |
-| 🔴 | Failed | Session failed to start |
-
-### Permission Mode (Claude sessions)
-
-| Emoji | Mode | Meaning |
-|-------|------|---------|
-| ⏸ | Plan | Claude is in plan mode |
-| ⏩ | Edit | Claude is auto-accepting edits |
 
 ## License
 

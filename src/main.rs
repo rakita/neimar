@@ -37,7 +37,6 @@ fn process_frame(
         }
     }
     if !app.should_quit {
-        app.update_pty_permission_modes();
         app.poll_status_files();
         app.check_pending_ralph_commands();
         terminal.draw(|frame| app.render(frame))?;
