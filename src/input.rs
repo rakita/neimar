@@ -303,11 +303,14 @@ impl App {
 
     fn handle_selecting_type_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Up
-            | KeyCode::Down
-            | KeyCode::Left
-            | KeyCode::Right
-            | KeyCode::Tab => {
+            KeyCode::Left => {
+                self.selected_cli_type = match self.selected_cli_type {
+                    CliType::Claude => CliType::Console,
+                    CliType::Amp => CliType::Claude,
+                    CliType::Console => CliType::Amp,
+                };
+            }
+            KeyCode::Right | KeyCode::Tab => {
                 self.selected_cli_type = match self.selected_cli_type {
                     CliType::Claude => CliType::Amp,
                     CliType::Amp => CliType::Console,

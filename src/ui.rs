@@ -61,65 +61,52 @@ impl App {
                 let s = &self.sessions[idx];
                 let state = s.inferred_state();
 
-                let state_label = state.label().to_string();
-                let state_color = state.color();
+                let state_emoji = state.label().to_string();
 
                 let name_style = Style::default();
 
-                // Line 1: [MODE_EMOJI][STATE] name (left) + ai_state + context info (right-aligned)
+                // Line 1: [MODE_EMOJI][TYPE_EMOJI] name (left) + ai_state + state_emoji + metadata (right-aligned)
                 let mode_emoji = s.permission_mode.emoji();
-                let state_width = mode_emoji.len()
-                    + state_label.len()
-                    + 1
-                    + if mode_emoji.is_empty() { 0 } else { 1 }; // +1 for space, +1 for gap after mode emoji
-                let display_name: String = s.name.clone();
+                let left_prefix_width = if mode_emoji.is_empty() { 0 } else { mode_emoji.len() + 1 };
+                let display_name: String = format!("{} {}", s.cli_type.emoji(), s.name);
 
-                // Build right-side components: AI state label + metadata
+                // Build right-side components: AI text label + state emoji + metadata
                 let ai_label = if !matches!(state, SessionState::Starting) {
-                    Some(state.text_label().to_string())
+                    Some(format!("{}{}", state.text_label(), state_emoji))
                 } else {
                     None
                 };
-                let ai_color = ai_label.as_ref().map(|_| state.color());
-                let metadata_text = if let Some(ref cs) = s.claude_status {
-                    let pct = cs.context_window.used_percentage as u32;
-                    let turn_str = format!("T:{}", s.turn_count);
+                let ai_color = state.color();
+                let metadata_text = {
                     let mode_label = s.permission_mode.label();
-                    if mode_label.is_empty() {
-                        format!("{}% {}", pct, turn_str)
-                    } else {
-                        format!("{}% {} {}", pct, turn_str, mode_label)
-                    }
-                } else {
-                    String::new()
+                    mode_label.to_string()
                 };
 
                 let right_width = match (&ai_label, metadata_text.is_empty()) {
-                    (Some(ai), false) => ai.len() + 1 + metadata_text.len(),
-                    (Some(ai), true) => ai.len(),
+                    (Some(ai), false) => ai.chars().count() + 1 + metadata_text.len(),
+                    (Some(ai), true) => ai.chars().count(),
                     (None, false) => metadata_text.len(),
                     (None, true) => 0,
                 };
 
                 let name_max = inner_width
-                    .saturating_sub(state_width)
+                    .saturating_sub(left_prefix_width)
                     .saturating_sub(if right_width == 0 { 0 } else { right_width + 1 });
                 let display_name: String = display_name.chars().take(name_max).collect();
-                let used = state_width + display_name.chars().count() + right_width;
+                let used = left_prefix_width + display_name.chars().count() + right_width;
                 let pad1 = inner_width.saturating_sub(used);
                 let mut line1_spans = vec![];
                 if !mode_emoji.is_empty() {
                     line1_spans.push(Span::raw(format!("{} ", mode_emoji)));
                 }
                 line1_spans.extend([
-                    Span::styled(state_label, Style::new().fg(state_color).bold()),
-                    Span::styled(format!(" {}", display_name), name_style),
+                    Span::styled(display_name, name_style),
                     Span::raw(" ".repeat(pad1)),
                 ]);
                 if let Some(ref ai) = ai_label {
                     line1_spans.push(Span::styled(
                         ai.clone(),
-                        Style::new().fg(ai_color.unwrap()).bold(),
+                        Style::new().fg(ai_color).bold(),
                     ));
                     if !metadata_text.is_empty() {
                         line1_spans.push(Span::styled(
@@ -451,9 +438,9 @@ impl App {
                         Span::raw("  "),
                         Span::styled(" 2: ⚡ amp ", amp_style),
                         Span::raw("  "),
-                        Span::styled(" 3: >_ console ", console_style),
+                        Span::styled(" 3: 🖥️ console ", console_style),
                         Span::styled(
-                            "    ↑↓/Tab: switch  Enter: confirm",
+                            "    ←/→/Tab: switch  Enter: confirm",
                             Style::new().dark_gray(),
                         ),
                     ]),

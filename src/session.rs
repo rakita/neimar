@@ -125,6 +125,14 @@ impl CliType {
         }
     }
 
+    pub(crate) fn emoji(&self) -> &'static str {
+        match self {
+            CliType::Claude => "🤖",
+            CliType::Amp => "⚡",
+            CliType::Console => "🖥️",
+        }
+    }
+
     #[allow(dead_code)]
     pub(crate) fn label(&self) -> &'static str {
         match self {
