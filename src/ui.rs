@@ -116,7 +116,7 @@ impl App {
 
                 // Build right-side components: AI text label + state emoji + metadata
                 let ai_label = if !matches!(state, SessionState::Starting) {
-                    Some(format!("{} {}", state.text_label(), state_emoji))
+                    Some(format!("{} {}", state_emoji, state.text_label()))
                 } else {
                     None
                 };
