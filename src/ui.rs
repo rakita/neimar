@@ -69,7 +69,7 @@ impl App {
                 // Line 1: [MODE_EMOJI][TYPE_EMOJI] name (left) + ai_state + state_emoji + metadata (right-aligned)
                 let mode_emoji = s.permission_mode.emoji();
                 let left_prefix_width = if mode_emoji.is_empty() { 0 } else { UnicodeWidthStr::width(mode_emoji) + 1 };
-                let display_name: String = format!("{} {}", s.cli_type.emoji(), s.name);
+                let display_name: String = format!("{}  {}", s.cli_type.emoji(), s.name);
 
                 // Build right-side components: AI text label + state emoji + metadata
                 let ai_label = if !matches!(state, SessionState::Starting) {
@@ -93,7 +93,13 @@ impl App {
                 let name_max = inner_width
                     .saturating_sub(left_prefix_width)
                     .saturating_sub(if right_width == 0 { 0 } else { right_width + 1 });
-                let display_name: String = display_name.chars().take(name_max).collect();
+                let display_name: String = {
+                    let mut w = 0;
+                    display_name.chars().take_while(|c| {
+                        w += unicode_width::UnicodeWidthChar::width(*c).unwrap_or(0);
+                        w <= name_max
+                    }).collect()
+                };
                 let used = left_prefix_width + UnicodeWidthStr::width(display_name.as_str()) + right_width;
                 let pad1 = inner_width.saturating_sub(used);
                 let mut line1_spans = vec![];
