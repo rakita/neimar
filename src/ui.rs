@@ -12,6 +12,7 @@ use ratatui::{
     },
 };
 use tui_term::widget::PseudoTerminal;
+use unicode_width::UnicodeWidthStr;
 
 const PASTEL_CYAN: Color = Color::Rgb(150, 220, 235);
 const PASTEL_YELLOW: Color = Color::Rgb(255, 255, 150);
@@ -67,12 +68,12 @@ impl App {
 
                 // Line 1: [MODE_EMOJI][TYPE_EMOJI] name (left) + ai_state + state_emoji + metadata (right-aligned)
                 let mode_emoji = s.permission_mode.emoji();
-                let left_prefix_width = if mode_emoji.is_empty() { 0 } else { mode_emoji.len() + 1 };
+                let left_prefix_width = if mode_emoji.is_empty() { 0 } else { UnicodeWidthStr::width(mode_emoji) + 1 };
                 let display_name: String = format!("{} {}", s.cli_type.emoji(), s.name);
 
                 // Build right-side components: AI text label + state emoji + metadata
                 let ai_label = if !matches!(state, SessionState::Starting) {
-                    Some(format!("{}{}", state.text_label(), state_emoji))
+                    Some(format!("{} {}", state.text_label(), state_emoji))
                 } else {
                     None
                 };
@@ -83,8 +84,8 @@ impl App {
                 };
 
                 let right_width = match (&ai_label, metadata_text.is_empty()) {
-                    (Some(ai), false) => ai.chars().count() + 1 + metadata_text.len(),
-                    (Some(ai), true) => ai.chars().count(),
+                    (Some(ai), false) => UnicodeWidthStr::width(ai.as_str()) + 1 + metadata_text.len(),
+                    (Some(ai), true) => UnicodeWidthStr::width(ai.as_str()),
                     (None, false) => metadata_text.len(),
                     (None, true) => 0,
                 };
@@ -93,7 +94,7 @@ impl App {
                     .saturating_sub(left_prefix_width)
                     .saturating_sub(if right_width == 0 { 0 } else { right_width + 1 });
                 let display_name: String = display_name.chars().take(name_max).collect();
-                let used = left_prefix_width + display_name.chars().count() + right_width;
+                let used = left_prefix_width + UnicodeWidthStr::width(display_name.as_str()) + right_width;
                 let pad1 = inner_width.saturating_sub(used);
                 let mut line1_spans = vec![];
                 if !mode_emoji.is_empty() {

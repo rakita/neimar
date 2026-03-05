@@ -10,6 +10,20 @@ The name *neimar* is a Serbian word meaning "builder" or "master builder" — fi
 
 ![Neimar](assets/console.png)
 
+## Install
+
+Install [Rust](https://www.rust-lang.org/tools/install) (if you don't have it):
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Then install neimar:
+
+```bash
+cargo install neimar
+```
+
 ## Features
 
 - **Multi-session** — Run multiple AI sessions simultaneously, switch between them instantly
@@ -22,13 +36,6 @@ The name *neimar* is a Serbian word meaning "builder" or "master builder" — fi
 - **Multiple CLI types** — Claude, Amp, or plain shell sessions
 - **Agents directory** — Browse and view agent definition files from a dedicated tab
 - **Ralph loop** — Automated prompt injection for iterative Claude workflows
-
-## Build & Run
-
-```bash
-cargo build          # compile
-cargo run            # run the app
-```
 
 ## Status Indicators
 
@@ -43,13 +50,6 @@ cargo run            # run the app
 | ⏳ | Starting | Session just started |
 | 🔒 | Closed | Session exited normally |
 | 🔴 | Failed | Session failed to start |
-
-### Permission Mode (Claude sessions)
-
-| Emoji | Mode | Meaning |
-|-------|------|---------|
-| ⏸ | Plan | Claude is in plan mode |
-| ⏩ | Edit | Claude is auto-accepting edits |
 
 ## Session Types
 

@@ -855,6 +855,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tui-term",
+ "unicode-width",
  "vt100",
 ]
 
