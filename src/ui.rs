@@ -12,10 +12,53 @@ use ratatui::{
     },
 };
 use tui_term::widget::PseudoTerminal;
-use unicode_width::UnicodeWidthStr;
-
 const PASTEL_CYAN: Color = Color::Rgb(150, 220, 235);
 const PASTEL_YELLOW: Color = Color::Rgb(255, 255, 150);
+
+/// Returns the display width of a string, correcting for emoji characters
+/// that `unicode-width` underreports (e.g. ⏸ U+23F8, ⚡ U+26A1, ⏩ U+23E9).
+fn display_width(s: &str) -> usize {
+    s.chars().map(|c| char_width(c)).sum()
+}
+
+fn char_width(c: char) -> usize {
+    let uw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+    if uw <= 1 && is_wide_emoji(c) {
+        2
+    } else {
+        uw
+    }
+}
+
+/// Emoji characters commonly reported as width 1 by unicode-width but
+/// rendered as width 2 in most terminals.
+fn is_wide_emoji(c: char) -> bool {
+    matches!(c,
+        '\u{23E9}'  // ⏩
+        | '\u{23F8}' // ⏸
+        | '\u{26A1}' // ⚡
+        | '\u{2705}' // ✅
+        | '\u{274C}' // ❌
+        | '\u{2728}' // ✨
+        | '\u{231B}' // ⌛
+        | '\u{26D4}' // ⛔
+        | '\u{2615}' // ☕
+        | '\u{2B50}' // ⭐
+        | '\u{26AA}' // ⚪
+        | '\u{26AB}' // ⚫
+        | '\u{2764}' // ❤
+        | '\u{203C}' // ‼
+        | '\u{2049}' // ⁉
+        | '\u{1F916}' // 🤖 (Claude CLI type)
+        | '\u{1F5A5}' // 🖥 (Console CLI type, base char)
+        | '\u{1F9F1}' // 🧱 (Working state)
+        | '\u{1F4AC}' // 💬 (Input state)
+        | '\u{1F4CB}' // 📋 (Planned state)
+        | '\u{1F7E2}' // 🟢 (Done state)
+        | '\u{1F512}' // 🔒 (Closed state)
+        | '\u{1F534}' // 🔴 (Failed state)
+    )
+}
 
 // ── Rendering ───────────────────────────────────────────
 
@@ -68,8 +111,8 @@ impl App {
 
                 // Line 1: [MODE_EMOJI][TYPE_EMOJI] name (left) + ai_state + state_emoji + metadata (right-aligned)
                 let mode_emoji = s.permission_mode.emoji();
-                let left_prefix_width = if mode_emoji.is_empty() { 0 } else { UnicodeWidthStr::width(mode_emoji) + 1 };
-                let display_name: String = format!("{}  {}", s.cli_type.emoji(), s.name);
+                let left_prefix_width = if mode_emoji.is_empty() { 0 } else { display_width(mode_emoji) + 1 };
+                let display_name: String = format!("{} {}", s.cli_type.emoji(), s.name);
 
                 // Build right-side components: AI text label + state emoji + metadata
                 let ai_label = if !matches!(state, SessionState::Starting) {
@@ -84,8 +127,8 @@ impl App {
                 };
 
                 let right_width = match (&ai_label, metadata_text.is_empty()) {
-                    (Some(ai), false) => UnicodeWidthStr::width(ai.as_str()) + 1 + metadata_text.len(),
-                    (Some(ai), true) => UnicodeWidthStr::width(ai.as_str()),
+                    (Some(ai), false) => display_width(ai.as_str()) + 1 + metadata_text.len(),
+                    (Some(ai), true) => display_width(ai.as_str()),
                     (None, false) => metadata_text.len(),
                     (None, true) => 0,
                 };
@@ -96,12 +139,12 @@ impl App {
                 let display_name: String = {
                     let mut w = 0;
                     display_name.chars().take_while(|c| {
-                        w += unicode_width::UnicodeWidthChar::width(*c).unwrap_or(0);
+                        w += char_width(*c);
                         w <= name_max
                     }).collect()
                 };
-                let used = left_prefix_width + UnicodeWidthStr::width(display_name.as_str()) + right_width;
-                let pad1 = inner_width.saturating_sub(used);
+                let used = left_prefix_width + display_width(display_name.as_str()) + right_width;
+                let pad1 = inner_width.saturating_sub(used).saturating_sub(1);
                 let mut line1_spans = vec![];
                 if !mode_emoji.is_empty() {
                     line1_spans.push(Span::raw(format!("{} ", mode_emoji)));
