@@ -289,13 +289,15 @@ impl App {
             KeyCode::Left => {
                 self.ui.selected_cli_type = match self.ui.selected_cli_type {
                     CliType::Claude => CliType::Console,
-                    CliType::Amp => CliType::Claude,
+                    CliType::ClaudeDangerous => CliType::Claude,
+                    CliType::Amp => CliType::ClaudeDangerous,
                     CliType::Console => CliType::Amp,
                 };
             }
             KeyCode::Right | KeyCode::Tab => {
                 self.ui.selected_cli_type = match self.ui.selected_cli_type {
-                    CliType::Claude => CliType::Amp,
+                    CliType::Claude => CliType::ClaudeDangerous,
+                    CliType::ClaudeDangerous => CliType::Amp,
                     CliType::Amp => CliType::Console,
                     CliType::Console => CliType::Claude,
                 };
@@ -310,11 +312,16 @@ impl App {
                 self.ui.input_buffer.clear();
             }
             KeyCode::Char('2') => {
-                self.ui.selected_cli_type = CliType::Amp;
+                self.ui.selected_cli_type = CliType::ClaudeDangerous;
                 self.ui.input_mode = InputMode::NamingSession;
                 self.ui.input_buffer.clear();
             }
             KeyCode::Char('3') => {
+                self.ui.selected_cli_type = CliType::Amp;
+                self.ui.input_mode = InputMode::NamingSession;
+                self.ui.input_buffer.clear();
+            }
+            KeyCode::Char('4') => {
                 self.ui.selected_cli_type = CliType::Console;
                 self.ui.input_mode = InputMode::NamingSession;
                 self.ui.input_buffer.clear();

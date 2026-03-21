@@ -21,6 +21,7 @@ pub(crate) enum AppEvent {
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum CliType {
     Claude,
+    ClaudeDangerous,
     Amp,
     Console,
 }
@@ -28,15 +29,23 @@ pub(crate) enum CliType {
 impl CliType {
     pub(crate) fn command(&self) -> String {
         match self {
-            CliType::Claude => "claude".to_string(),
+            CliType::Claude | CliType::ClaudeDangerous => "claude".to_string(),
             CliType::Amp => "amp".to_string(),
             CliType::Console => std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string()),
+        }
+    }
+
+    pub(crate) fn args(&self) -> Vec<&'static str> {
+        match self {
+            CliType::ClaudeDangerous => vec!["--dangerously-skip-permissions"],
+            _ => vec![],
         }
     }
 
     pub(crate) fn emoji(&self) -> &'static str {
         match self {
             CliType::Claude => "🤖",
+            CliType::ClaudeDangerous => "🤖🔓",
             CliType::Amp => "⚡",
             CliType::Console => "🖥️",
         }
@@ -46,6 +55,7 @@ impl CliType {
     pub(crate) fn label(&self) -> &'static str {
         match self {
             CliType::Claude => "claude",
+            CliType::ClaudeDangerous => "claude!",
             CliType::Amp => "amp",
             CliType::Console => "console",
         }

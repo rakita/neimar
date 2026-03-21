@@ -220,6 +220,9 @@ impl App {
 
         // Ralph sessions spawn interactive claude (no -p), regular sessions use the cli_type command
         let mut cmd = CommandBuilder::new(cli_type.command());
+        for arg in cli_type.args() {
+            cmd.arg(arg);
+        }
         cmd.env("TERM", "xterm-256color");
         if !status_path.as_os_str().is_empty() {
             cmd.env("NEIMAR_STATUS_FILE", status_path.to_str().unwrap());

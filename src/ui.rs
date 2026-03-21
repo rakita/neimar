@@ -55,6 +55,7 @@ fn is_wide_emoji(c: char) -> bool {
         | '\u{1F4CB}' // 📋 (Planned state)
         | '\u{1F7E2}' // 🟢 (Done state)
         | '\u{1F512}' // 🔒 (Closed state)
+        | '\u{1F513}' // 🔓 (Dangerous mode)
         | '\u{1F534}' // 🔴 (Failed state)
     )
 }
@@ -449,33 +450,27 @@ impl App {
                 ]),
             ),
             InputMode::SelectingSessionType => {
-                let claude_style = if self.ui.selected_cli_type == CliType::Claude {
-                    Style::new().bg(PASTEL_CYAN).fg(Color::Black).bold()
-                } else {
-                    Style::default()
-                };
-                let amp_style = if self.ui.selected_cli_type == CliType::Amp {
-                    Style::new().bg(PASTEL_CYAN).fg(Color::Black).bold()
-                } else {
-                    Style::default()
-                };
-                let console_style = if self.ui.selected_cli_type == CliType::Console {
-                    Style::new().bg(PASTEL_CYAN).fg(Color::Black).bold()
-                } else {
-                    Style::default()
+                let style_for = |t: CliType| {
+                    if self.ui.selected_cli_type == t {
+                        Style::new().bg(PASTEL_CYAN).fg(Color::Black).bold()
+                    } else {
+                        Style::default()
+                    }
                 };
                 (
                     " Select type (Esc to cancel) ".to_string(),
                     Style::new().fg(PASTEL_CYAN),
                     Line::from(vec![
                         Span::raw("  "),
-                        Span::styled(" 1: 🤖 claude ", claude_style),
-                        Span::raw("  "),
-                        Span::styled(" 2: ⚡ amp ", amp_style),
-                        Span::raw("  "),
-                        Span::styled(" 3: 🖥️ console ", console_style),
+                        Span::styled(" 1: 🤖 claude ", style_for(CliType::Claude)),
+                        Span::raw(" "),
+                        Span::styled(" 2: 🤖🔓 claude! ", style_for(CliType::ClaudeDangerous)),
+                        Span::raw(" "),
+                        Span::styled(" 3: ⚡ amp ", style_for(CliType::Amp)),
+                        Span::raw(" "),
+                        Span::styled(" 4: 🖥️ console ", style_for(CliType::Console)),
                         Span::styled(
-                            "    ←/→/Tab: switch  Enter: confirm",
+                            "  ←/→: switch  Enter: confirm",
                             Style::new().dark_gray(),
                         ),
                     ]),
