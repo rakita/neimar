@@ -55,7 +55,7 @@ impl CliType {
     pub(crate) fn label(&self) -> &'static str {
         match self {
             CliType::Claude => "claude",
-            CliType::ClaudeDangerous => "claude!",
+            CliType::ClaudeDangerous => "claude danger-accept-permissions",
             CliType::Amp => "amp",
             CliType::Console => "console",
         }

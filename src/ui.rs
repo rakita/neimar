@@ -464,7 +464,7 @@ impl App {
                         Span::raw("  "),
                         Span::styled(" 1: 🤖 claude ", style_for(CliType::Claude)),
                         Span::raw(" "),
-                        Span::styled(" 2: 🤖🔓 claude! ", style_for(CliType::ClaudeDangerous)),
+                        Span::styled(" 2: 🤖🔓 claude danger-accept-permissions ", style_for(CliType::ClaudeDangerous)),
                         Span::raw(" "),
                         Span::styled(" 3: ⚡ amp ", style_for(CliType::Amp)),
                         Span::raw(" "),
