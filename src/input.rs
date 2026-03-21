@@ -1,8 +1,9 @@
-use crate::app::{App, Focus, InputMode, LeftTab, RalphConfig, Selection};
+use crate::app::App;
 use crate::mouse;
-use crate::session::{CliType, SESSION_ITEM_HEIGHT};
+use crate::types::{
+    CliType, Focus, InputMode, LeftTab, RalphConfig, Selection, SESSION_ITEM_HEIGHT,
+};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use std::io::Write;
 
 // ── Key to terminal bytes ───────────────────────────────
 
@@ -67,7 +68,7 @@ fn key_to_bytes(key: &KeyEvent) -> Vec<u8> {
 
 impl App {
     pub(crate) fn handle_key(&mut self, key: KeyEvent) {
-        match self.input_mode {
+        match self.ui.input_mode {
             InputMode::SelectingSessionType => {
                 self.handle_selecting_type_key(key);
                 return;
@@ -93,20 +94,20 @@ impl App {
 
         // Shift+Arrow/Page keys work regardless of current panel
         if key.modifiers.contains(KeyModifiers::SHIFT) {
-            let panel_height = self.last_right_panel_size.0 as usize;
+            let panel_height = self.layout.last_right_panel_size.0 as usize;
             match key.code {
                 KeyCode::Left => {
-                    self.focus = Focus::Sessions;
+                    self.ui.focus = Focus::Sessions;
                     return;
                 }
                 KeyCode::Right => {
-                    if self.left_tab == LeftTab::Sessions && self.selected_session().is_some() {
-                        self.focus = Focus::Terminal;
+                    if self.ui.left_tab == LeftTab::Sessions && self.selected_session().is_some() {
+                        self.ui.focus = Focus::Terminal;
                     }
                     return;
                 }
                 KeyCode::PageUp => {
-                    self.selection = None;
+                    self.drag.selection = None;
                     if let Some(session) = self.selected_session_mut() {
                         session.scroll_offset += panel_height.saturating_sub(1).max(1);
                         session.clamp_scroll();
@@ -114,7 +115,7 @@ impl App {
                     return;
                 }
                 KeyCode::PageDown => {
-                    self.selection = None;
+                    self.drag.selection = None;
                     if let Some(session) = self.selected_session_mut() {
                         session.scroll_offset = session
                             .scroll_offset
@@ -127,8 +128,8 @@ impl App {
         }
 
 
-        match self.focus {
-            Focus::Sessions => match self.left_tab {
+        match self.ui.focus {
+            Focus::Sessions => match self.ui.left_tab {
                 LeftTab::Sessions => self.handle_sessions_key(key),
                 LeftTab::Agents => self.handle_agents_key(key),
             },
@@ -140,48 +141,34 @@ impl App {
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Char('n') => {
-                self.input_mode = InputMode::SelectingSessionType;
-                self.selected_cli_type = CliType::Claude;
+                self.ui.input_mode = InputMode::SelectingSessionType;
+                self.ui.selected_cli_type = CliType::Claude;
             }
             KeyCode::Char('l') => {
-                self.input_mode = InputMode::NamingRalph;
-                self.input_buffer.clear();
+                self.ui.input_mode = InputMode::NamingRalph;
+                self.ui.input_buffer.clear();
             }
             KeyCode::Char('r') => {
-                if let Some(real_idx) = self.selected_real_index() {
-                    Self::cleanup_status_file(&self.sessions[real_idx].status_file);
-                    self.sessions.remove(real_idx);
-                    self.rebuild_session_id_map();
-                    let vis = self.visible_sessions();
-                    if vis.is_empty() {
-                        self.list_state.select(None);
-                        self.focus = Focus::Sessions;
-                    } else {
-                        let sel = self.list_state.selected().unwrap_or(0);
-                        if sel >= vis.len() {
-                            self.list_state.select(Some(vis.len() - 1));
-                        }
-                    }
-                }
+                self.remove_selected_session();
             }
             KeyCode::Char('e') => {
                 if let Some(real_idx) = self.selected_real_index() {
-                    self.input_mode = InputMode::RenamingSession;
-                    self.input_buffer = self.sessions[real_idx].name.clone();
+                    self.ui.input_mode = InputMode::RenamingSession;
+                    self.ui.input_buffer = self.sessions[real_idx].name.clone();
                 }
             }
             KeyCode::Char('h') => {
-                self.left_panel_half = !self.left_panel_half;
-                if !self.left_panel_half {
-                    self.left_panel_width = 42;
+                self.ui.left_panel_half = !self.ui.left_panel_half;
+                if !self.ui.left_panel_half {
+                    self.layout.left_panel_width = 42;
                 }
             }
             KeyCode::Left | KeyCode::Right => {
-                self.left_tab = LeftTab::Agents;
+                self.ui.left_tab = LeftTab::Agents;
                 self.agent_scroll_offset = 0;
             }
             KeyCode::Up => {
-                self.selection = None;
+                self.drag.selection = None;
                 let vis = self.visible_sessions();
                 if let Some(sel) = self.list_state.selected() {
                     if sel > 0 {
@@ -192,7 +179,7 @@ impl App {
                 }
             }
             KeyCode::Down => {
-                self.selection = None;
+                self.drag.selection = None;
                 let vis = self.visible_sessions();
                 if let Some(sel) = self.list_state.selected() {
                     if sel + 1 < vis.len() {
@@ -212,12 +199,12 @@ impl App {
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Left | KeyCode::Right => {
-                self.left_tab = LeftTab::Sessions;
+                self.ui.left_tab = LeftTab::Sessions;
             }
             KeyCode::Char('n') => {
-                self.left_tab = LeftTab::Sessions;
-                self.input_mode = InputMode::SelectingSessionType;
-                self.selected_cli_type = CliType::Claude;
+                self.ui.left_tab = LeftTab::Sessions;
+                self.ui.input_mode = InputMode::SelectingSessionType;
+                self.ui.selected_cli_type = CliType::Claude;
             }
             KeyCode::Up => {
                 if let Some(sel) = self.agent_list_state.selected() {
@@ -249,29 +236,25 @@ impl App {
     fn handle_naming_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Enter => {
-                if !self.input_buffer.is_empty() {
-                    let name = self.input_buffer.clone();
-                    let cli_type = self.selected_cli_type;
-                    self.input_mode = InputMode::Normal;
-                    self.input_buffer.clear();
-                    let (rows, cols) = if self.last_right_panel_size != (0, 0) {
-                        self.last_right_panel_size
-                    } else {
-                        (24, 80)
-                    };
+                if !self.ui.input_buffer.is_empty() {
+                    let name = self.ui.input_buffer.clone();
+                    let cli_type = self.ui.selected_cli_type;
+                    self.ui.input_mode = InputMode::Normal;
+                    self.ui.input_buffer.clear();
+                    let (rows, cols) = self.panel_size_or_default();
                     self.create_session(name, cli_type, rows, cols);
                 } else {
-                    self.input_mode = InputMode::Normal;
-                    self.input_buffer.clear();
+                    self.ui.input_mode = InputMode::Normal;
+                    self.ui.input_buffer.clear();
                 }
             }
             KeyCode::Esc => {
-                self.input_mode = InputMode::Normal;
-                self.input_buffer.clear();
+                self.ui.input_mode = InputMode::Normal;
+                self.ui.input_buffer.clear();
             }
-            KeyCode::Char(c) => self.input_buffer.push(c),
+            KeyCode::Char(c) => self.ui.input_buffer.push(c),
             KeyCode::Backspace => {
-                self.input_buffer.pop();
+                self.ui.input_buffer.pop();
             }
             _ => {}
         }
@@ -280,22 +263,22 @@ impl App {
     fn handle_renaming_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Enter => {
-                if !self.input_buffer.is_empty() {
-                    let new_name = self.input_buffer.clone();
+                if !self.ui.input_buffer.is_empty() {
+                    let new_name = self.ui.input_buffer.clone();
                     if let Some(session) = self.selected_session_mut() {
                         session.name = new_name;
                     }
                 }
-                self.input_mode = InputMode::Normal;
-                self.input_buffer.clear();
+                self.ui.input_mode = InputMode::Normal;
+                self.ui.input_buffer.clear();
             }
             KeyCode::Esc => {
-                self.input_mode = InputMode::Normal;
-                self.input_buffer.clear();
+                self.ui.input_mode = InputMode::Normal;
+                self.ui.input_buffer.clear();
             }
-            KeyCode::Char(c) => self.input_buffer.push(c),
+            KeyCode::Char(c) => self.ui.input_buffer.push(c),
             KeyCode::Backspace => {
-                self.input_buffer.pop();
+                self.ui.input_buffer.pop();
             }
             _ => {}
         }
@@ -304,40 +287,40 @@ impl App {
     fn handle_selecting_type_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Left => {
-                self.selected_cli_type = match self.selected_cli_type {
+                self.ui.selected_cli_type = match self.ui.selected_cli_type {
                     CliType::Claude => CliType::Console,
                     CliType::Amp => CliType::Claude,
                     CliType::Console => CliType::Amp,
                 };
             }
             KeyCode::Right | KeyCode::Tab => {
-                self.selected_cli_type = match self.selected_cli_type {
+                self.ui.selected_cli_type = match self.ui.selected_cli_type {
                     CliType::Claude => CliType::Amp,
                     CliType::Amp => CliType::Console,
                     CliType::Console => CliType::Claude,
                 };
             }
             KeyCode::Enter => {
-                self.input_mode = InputMode::NamingSession;
-                self.input_buffer.clear();
+                self.ui.input_mode = InputMode::NamingSession;
+                self.ui.input_buffer.clear();
             }
             KeyCode::Char('1') => {
-                self.selected_cli_type = CliType::Claude;
-                self.input_mode = InputMode::NamingSession;
-                self.input_buffer.clear();
+                self.ui.selected_cli_type = CliType::Claude;
+                self.ui.input_mode = InputMode::NamingSession;
+                self.ui.input_buffer.clear();
             }
             KeyCode::Char('2') => {
-                self.selected_cli_type = CliType::Amp;
-                self.input_mode = InputMode::NamingSession;
-                self.input_buffer.clear();
+                self.ui.selected_cli_type = CliType::Amp;
+                self.ui.input_mode = InputMode::NamingSession;
+                self.ui.input_buffer.clear();
             }
             KeyCode::Char('3') => {
-                self.selected_cli_type = CliType::Console;
-                self.input_mode = InputMode::NamingSession;
-                self.input_buffer.clear();
+                self.ui.selected_cli_type = CliType::Console;
+                self.ui.input_mode = InputMode::NamingSession;
+                self.ui.input_buffer.clear();
             }
             KeyCode::Esc => {
-                self.input_mode = InputMode::Normal;
+                self.ui.input_mode = InputMode::Normal;
             }
             _ => {}
         }
@@ -346,22 +329,22 @@ impl App {
     fn handle_naming_ralph_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Enter => {
-                if !self.input_buffer.is_empty() {
-                    self.pending_session_name = Some(self.input_buffer.clone());
-                    self.input_buffer.clear();
-                    self.input_mode = InputMode::EnteringRalphPrompt;
+                if !self.ui.input_buffer.is_empty() {
+                    self.ui.pending_session_name = Some(self.ui.input_buffer.clone());
+                    self.ui.input_buffer.clear();
+                    self.ui.input_mode = InputMode::EnteringRalphPrompt;
                 } else {
-                    self.input_mode = InputMode::Normal;
-                    self.input_buffer.clear();
+                    self.ui.input_mode = InputMode::Normal;
+                    self.ui.input_buffer.clear();
                 }
             }
             KeyCode::Esc => {
-                self.input_mode = InputMode::Normal;
-                self.input_buffer.clear();
+                self.ui.input_mode = InputMode::Normal;
+                self.ui.input_buffer.clear();
             }
-            KeyCode::Char(c) => self.input_buffer.push(c),
+            KeyCode::Char(c) => self.ui.input_buffer.push(c),
             KeyCode::Backspace => {
-                self.input_buffer.pop();
+                self.ui.input_buffer.pop();
             }
             _ => {}
         }
@@ -370,25 +353,22 @@ impl App {
     fn handle_ralph_prompt_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Enter => {
-                if self.input_buffer.is_empty() {
-                    self.input_mode = InputMode::Normal;
-                    self.pending_session_name = None;
+                if self.ui.input_buffer.is_empty() {
+                    self.ui.input_mode = InputMode::Normal;
+                    self.ui.pending_session_name = None;
                     return;
                 }
 
-                let prompt = self.input_buffer.clone();
+                let prompt = self.ui.input_buffer.clone();
                 let name = self
+                    .ui
                     .pending_session_name
                     .take()
                     .unwrap_or_else(|| "Ralph".to_string());
-                self.input_mode = InputMode::Normal;
-                self.input_buffer.clear();
+                self.ui.input_mode = InputMode::Normal;
+                self.ui.input_buffer.clear();
 
-                let (rows, cols) = if self.last_right_panel_size != (0, 0) {
-                    self.last_right_panel_size
-                } else {
-                    (24, 80)
-                };
+                let (rows, cols) = self.panel_size_or_default();
 
                 let config = RalphConfig {
                     prompt,
@@ -398,13 +378,13 @@ impl App {
                 self.create_ralph_session(name, rows, cols, config);
             }
             KeyCode::Esc => {
-                self.input_mode = InputMode::Normal;
-                self.input_buffer.clear();
-                self.pending_session_name = None;
+                self.ui.input_mode = InputMode::Normal;
+                self.ui.input_buffer.clear();
+                self.ui.pending_session_name = None;
             }
-            KeyCode::Char(c) => self.input_buffer.push(c),
+            KeyCode::Char(c) => self.ui.input_buffer.push(c),
             KeyCode::Backspace => {
-                self.input_buffer.pop();
+                self.ui.input_buffer.pop();
             }
             _ => {}
         }
@@ -413,9 +393,9 @@ impl App {
     fn handle_terminal_key(&mut self, key: KeyEvent) {
         // Cmd+C with active selection: copy to clipboard instead of sending to PTY
         let is_copy = key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::SUPER);
-        if is_copy && self.selection.is_some() {
+        if is_copy && self.drag.selection.is_some() {
             self.copy_selection_to_clipboard();
-            self.selection = None;
+            self.drag.selection = None;
             return;
         }
 
@@ -425,22 +405,19 @@ impl App {
             && session.scroll_offset > 0
         {
             session.scroll_offset = 0;
-            self.selection = None;
+            self.drag.selection = None;
             return;
         }
 
         // Clear selection on any key forwarded to PTY
-        self.selection = None;
+        self.drag.selection = None;
 
         // Any other key forwarded to PTY: auto-snap to bottom
         if let Some(session) = self.selected_session_mut() {
             session.scroll_offset = 0;
-            if let Some(writer) = &mut session.pty_writer {
-                let bytes = key_to_bytes(&key);
-                if !bytes.is_empty() {
-                    let _ = writer.write_all(&bytes);
-                    let _ = writer.flush();
-                }
+            let bytes = key_to_bytes(&key);
+            if !bytes.is_empty() {
+                session.write_to_pty(&bytes);
             }
         }
     }
@@ -449,19 +426,19 @@ impl App {
         match event.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 // Check if clicking on the divider between panels
-                let divider_x = self.last_right_panel_area.x;
+                let divider_x = self.layout.last_right_panel_area.x;
                 if divider_x > 0
                     && event.column >= divider_x.saturating_sub(1)
                     && event.column <= divider_x + 1
-                    && event.row >= self.last_right_panel_area.y
-                    && event.row < self.last_right_panel_area.y + self.last_right_panel_area.height
+                    && event.row >= self.layout.last_right_panel_area.y
+                    && event.row < self.layout.last_right_panel_area.y + self.layout.last_right_panel_area.height
                 {
-                    self.dragging_divider = true;
+                    self.drag.dragging_divider = true;
                     return;
                 }
 
                 // Check if clicking on the scrollbar (rightmost column of inner panel)
-                let inner = self.last_right_panel_inner;
+                let inner = self.layout.last_right_panel_inner;
                 if inner.width > 0
                     && inner.height > 1
                     && event.column == inner.x + inner.width - 1
@@ -476,15 +453,15 @@ impl App {
                         let y_ratio = y_ratio.clamp(0.0, 1.0);
                         session.scroll_offset =
                             ((1.0 - y_ratio) * max_scroll as f64).round() as usize;
-                        self.dragging_scrollbar = true;
-                        self.selection = None;
+                        self.drag.dragging_scrollbar = true;
+                        self.drag.selection = None;
                         return;
                     }
                 }
 
                 // Check if clicking on the sessions scrollbar (rightmost column of sessions inner area)
-                if self.left_tab == LeftTab::Sessions {
-                    let sess_inner = self.last_sessions_area.inner(ratatui::layout::Margin::new(1, 1));
+                if self.ui.left_tab == LeftTab::Sessions {
+                    let sess_inner = self.layout.last_sessions_area.inner(ratatui::layout::Margin::new(1, 1));
                     let vis = self.visible_sessions();
                     if sess_inner.width > 0
                         && sess_inner.height > 1
@@ -498,29 +475,29 @@ impl App {
                         let y_ratio = y_ratio.clamp(0.0, 1.0);
                         let target = (y_ratio * (vis.len() - 1) as f64).round() as usize;
                         self.list_state.select(Some(target.min(vis.len() - 1)));
-                        self.dragging_sessions_scrollbar = true;
-                        self.selection = None;
+                        self.drag.dragging_sessions_scrollbar = true;
+                        self.drag.selection = None;
                         return;
                     }
                 }
 
                 // Clear any existing selection on new click
-                self.selection = None;
+                self.drag.selection = None;
 
-                match self.left_tab {
+                match self.ui.left_tab {
                     LeftTab::Sessions => {
                         let vis_count = self.visible_sessions().len();
                         let scroll_offset = self.list_state.offset();
                         if let Some(index) = mouse::clicked_session_index(
                             event.column,
                             event.row,
-                            self.last_sessions_area,
+                            self.layout.last_sessions_area,
                             vis_count,
                             SESSION_ITEM_HEIGHT,
                             scroll_offset,
                         ) {
                             self.list_state.select(Some(index));
-                            self.focus = Focus::Sessions;
+                            self.ui.focus = Focus::Sessions;
                         }
                     }
                     LeftTab::Agents => {
@@ -528,25 +505,25 @@ impl App {
                         if let Some(index) = mouse::clicked_session_index(
                             event.column,
                             event.row,
-                            self.last_sessions_area,
+                            self.layout.last_sessions_area,
                             self.agents.len(),
                             1,
                             scroll_offset,
                         ) {
                             self.agent_list_state.select(Some(index));
                             self.agent_scroll_offset = 0;
-                            self.focus = Focus::Sessions;
+                            self.ui.focus = Focus::Sessions;
                         }
                     }
                 }
                 // Clicking anywhere on left panel focuses it
-                let larea = self.last_sessions_area;
+                let larea = self.layout.last_sessions_area;
                 if event.column >= larea.x
                     && event.column < larea.x + larea.width
                     && event.row >= larea.y
                     && event.row < larea.y + larea.height
                 {
-                    self.focus = Focus::Sessions;
+                    self.ui.focus = Focus::Sessions;
                 }
                 // Clicking on right panel: start selection and switch focus
                 if let Some((vt_row, vt_col)) =
@@ -556,44 +533,44 @@ impl App {
                         .selected_session()
                         .map(|s| s.scroll_offset)
                         .unwrap_or(0);
-                    self.selection = Some(Selection {
+                    self.drag.selection = Some(Selection {
                         anchor_row: vt_row,
                         anchor_col: vt_col,
                         end_row: vt_row,
                         end_col: vt_col,
                         scroll_offset,
                     });
-                    if self.left_tab == LeftTab::Sessions && self.selected_session().is_some() {
-                        self.focus = Focus::Terminal;
+                    if self.ui.left_tab == LeftTab::Sessions && self.selected_session().is_some() {
+                        self.ui.focus = Focus::Terminal;
                     }
                 } else {
                     // Clicking on right panel border still switches focus
-                    let area = self.last_right_panel_area;
+                    let area = self.layout.last_right_panel_area;
                     if event.column >= area.x
                         && event.column < area.x + area.width
                         && event.row >= area.y
                         && event.row < area.y + area.height
-                        && self.left_tab == LeftTab::Sessions
+                        && self.ui.left_tab == LeftTab::Sessions
                         && self.selected_session().is_some()
                     {
-                        self.focus = Focus::Terminal;
+                        self.ui.focus = Focus::Terminal;
                     }
                 }
             }
             MouseEventKind::Drag(MouseButton::Left) => {
                 // Handle divider dragging
-                if self.dragging_divider {
-                    self.left_panel_half = false;
+                if self.drag.dragging_divider {
+                    self.ui.left_panel_half = false;
                     let total_width =
-                        self.last_sessions_area.width + self.last_right_panel_area.width;
+                        self.layout.last_sessions_area.width + self.layout.last_right_panel_area.width;
                     let min_width: u16 = 15;
                     let max_width = total_width / 2;
-                    self.left_panel_width = event.column.clamp(min_width, max_width);
+                    self.layout.left_panel_width = event.column.clamp(min_width, max_width);
                     return;
                 }
                 // Handle sessions scrollbar dragging
-                if self.dragging_sessions_scrollbar {
-                    let sess_inner = self.last_sessions_area.inner(ratatui::layout::Margin::new(1, 1));
+                if self.drag.dragging_sessions_scrollbar {
+                    let sess_inner = self.layout.last_sessions_area.inner(ratatui::layout::Margin::new(1, 1));
                     let vis = self.visible_sessions();
                     if sess_inner.height > 1 && !vis.is_empty() {
                         let clamped_row = event.row.max(sess_inner.y).min(sess_inner.y + sess_inner.height - 1);
@@ -606,8 +583,8 @@ impl App {
                     return;
                 }
                 // Handle scrollbar dragging
-                if self.dragging_scrollbar {
-                    let inner = self.last_right_panel_inner;
+                if self.drag.dragging_scrollbar {
+                    let inner = self.layout.last_right_panel_inner;
                     if inner.height > 1 {
                         let clamped_row = event.row.max(inner.y).min(inner.y + inner.height - 1);
                         let y_ratio =
@@ -622,14 +599,14 @@ impl App {
                     return;
                 }
                 // Update selection end point, clamped to inner rect bounds
-                if self.selection.is_some() {
-                    let inner = self.last_right_panel_inner;
+                if self.drag.selection.is_some() {
+                    let inner = self.layout.last_right_panel_inner;
                     if inner.width > 0 && inner.height > 0 {
                         let clamped_col =
                             event.column.max(inner.x).min(inner.x + inner.width - 1) - inner.x;
                         let clamped_row =
                             event.row.max(inner.y).min(inner.y + inner.height - 1) - inner.y;
-                        if let Some(sel) = &mut self.selection {
+                        if let Some(sel) = &mut self.drag.selection {
                             sel.end_row = clamped_row;
                             sel.end_col = clamped_col;
                         }
@@ -637,11 +614,11 @@ impl App {
                 }
             }
             MouseEventKind::Up(MouseButton::Left) => {
-                self.dragging_divider = false;
-                self.dragging_scrollbar = false;
-                self.dragging_sessions_scrollbar = false;
+                self.drag.dragging_divider = false;
+                self.drag.dragging_scrollbar = false;
+                self.drag.dragging_sessions_scrollbar = false;
                 // Auto-copy selection to clipboard on mouse-up if it's a real drag (not just a click)
-                if let Some(sel) = &self.selection {
+                if let Some(sel) = &self.drag.selection {
                     let (sr, sc, er, ec) = sel.ordered();
                     if sr != er || sc != ec {
                         self.copy_selection_to_clipboard();
@@ -649,14 +626,14 @@ impl App {
                 }
             }
             MouseEventKind::ScrollUp => {
-                self.selection = None;
-                let larea = self.last_sessions_area;
-                let rarea = self.last_right_panel_area;
+                self.drag.selection = None;
+                let larea = self.layout.last_sessions_area;
+                let rarea = self.layout.last_right_panel_area;
                 if event.column >= larea.x
                     && event.column < larea.x + larea.width
                     && event.row >= larea.y
                     && event.row < larea.y + larea.height
-                    && self.left_tab == LeftTab::Sessions
+                    && self.ui.left_tab == LeftTab::Sessions
                 {
                     // Move selection up (which auto-scrolls the list viewport)
                     if let Some(sel) = self.list_state.selected() {
@@ -669,7 +646,7 @@ impl App {
                     && event.row >= rarea.y
                     && event.row < rarea.y + rarea.height
                 {
-                    if self.left_tab == LeftTab::Agents {
+                    if self.ui.left_tab == LeftTab::Agents {
                         self.agent_scroll_offset = self.agent_scroll_offset.saturating_add(1);
                     } else if let Some(session) = self.selected_session_mut() {
                         session.scroll_offset += 1;
@@ -678,14 +655,14 @@ impl App {
                 }
             }
             MouseEventKind::ScrollDown => {
-                self.selection = None;
-                let larea = self.last_sessions_area;
-                let rarea = self.last_right_panel_area;
+                self.drag.selection = None;
+                let larea = self.layout.last_sessions_area;
+                let rarea = self.layout.last_right_panel_area;
                 if event.column >= larea.x
                     && event.column < larea.x + larea.width
                     && event.row >= larea.y
                     && event.row < larea.y + larea.height
-                    && self.left_tab == LeftTab::Sessions
+                    && self.ui.left_tab == LeftTab::Sessions
                 {
                     // Move selection down (which auto-scrolls the list viewport)
                     let vis = self.visible_sessions();
@@ -699,7 +676,7 @@ impl App {
                     && event.row >= rarea.y
                     && event.row < rarea.y + rarea.height
                 {
-                    if self.left_tab == LeftTab::Agents {
+                    if self.ui.left_tab == LeftTab::Agents {
                         self.agent_scroll_offset = self.agent_scroll_offset.saturating_sub(1);
                     } else if let Some(session) = self.selected_session_mut() {
                         session.scroll_offset = session.scroll_offset.saturating_sub(1);

@@ -1,6 +1,5 @@
-use crate::app::{App, Focus, InputMode, LeftTab};
-use crate::session::{CliType, SessionState};
-use portable_pty::PtySize;
+use crate::app::App;
+use crate::types::{CliType, Focus, InputMode, LeftTab, SessionState};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Position, Rect},
@@ -67,18 +66,18 @@ impl App {
         let [main_area, status_area] =
             Layout::vertical([Constraint::Fill(1), Constraint::Length(3)]).areas(frame.area());
 
-        if self.left_panel_half {
-            self.left_panel_width = frame.area().width / 2;
+        if self.ui.left_panel_half {
+            self.layout.left_panel_width = frame.area().width / 2;
         }
 
         let [left_area, right_area] = Layout::horizontal([
-            Constraint::Length(self.left_panel_width),
+            Constraint::Length(self.layout.left_panel_width),
             Constraint::Fill(1),
         ])
         .areas(main_area);
 
-        self.last_sessions_area = left_area;
-        match self.left_tab {
+        self.layout.last_sessions_area = left_area;
+        match self.ui.left_tab {
             LeftTab::Sessions => self.render_sessions(frame, left_area),
             LeftTab::Agents => self.render_agents(frame, left_area),
         }
@@ -87,7 +86,7 @@ impl App {
     }
 
     fn render_sessions(&mut self, frame: &mut Frame, area: Rect) {
-        let focused = self.focus == Focus::Sessions && matches!(self.input_mode, InputMode::Normal);
+        let focused = self.ui.focus == Focus::Sessions && matches!(self.ui.input_mode, InputMode::Normal);
 
         // Apply right margin by shrinking the area
         let area = Rect {
@@ -208,7 +207,7 @@ impl App {
     }
 
     fn render_agents(&mut self, frame: &mut Frame, area: Rect) {
-        let focused = self.focus == Focus::Sessions && matches!(self.input_mode, InputMode::Normal);
+        let focused = self.ui.focus == Focus::Sessions && matches!(self.ui.input_mode, InputMode::Normal);
 
         let items: Vec<ListItem> = self
             .agents
@@ -238,25 +237,14 @@ impl App {
 
     fn resize_all_sessions(&mut self, rows: u16, cols: u16) {
         for session in &mut self.sessions {
-            if (rows, cols) != session.last_size {
-                session.parser.screen_mut().set_size(rows, cols);
-                if let Some(master) = &session.pty_master {
-                    let _ = master.resize(PtySize {
-                        rows,
-                        cols,
-                        pixel_width: 0,
-                        pixel_height: 0,
-                    });
-                }
-                session.last_size = (rows, cols);
-            }
+            session.resize(rows, cols);
         }
     }
 
     fn render_right_panel(&mut self, frame: &mut Frame, area: Rect) {
-        self.last_right_panel_area = area;
+        self.layout.last_right_panel_area = area;
 
-        if self.left_tab == LeftTab::Agents {
+        if self.ui.left_tab == LeftTab::Agents {
             self.render_agent_content(frame, area);
             return;
         }
@@ -274,7 +262,7 @@ impl App {
             return;
         };
 
-        let border_style = if self.focus == Focus::Terminal {
+        let border_style = if self.ui.focus == Focus::Terminal {
             Style::new().fg(PASTEL_CYAN)
         } else {
             Style::new().fg(PASTEL_YELLOW)
@@ -328,30 +316,27 @@ impl App {
             .border_type(BorderType::Rounded)
             .border_style(border_style);
         let inner = block.inner(area);
-        self.last_right_panel_inner = inner;
+        self.layout.last_right_panel_inner = inner;
         frame.render_widget(block, area);
 
         // Resize ALL sessions when panel size changes (not just the visible one)
         let new_size = (inner.height, inner.width);
-        if new_size != self.last_right_panel_size && inner.width > 0 && inner.height > 0 {
-            self.last_right_panel_size = new_size;
+        if new_size != self.layout.last_right_panel_size && inner.width > 0 && inner.height > 0 {
+            self.layout.last_right_panel_size = new_size;
             self.resize_all_sessions(inner.height, inner.width);
         }
 
         // Apply scrollback offset before rendering
-        self.sessions[idx]
-            .parser
-            .screen_mut()
-            .set_scrollback(scroll_offset);
+        self.sessions[idx].set_scrollback(scroll_offset);
 
-        let mut pseudo_term = PseudoTerminal::new(self.sessions[idx].parser.screen());
+        let mut pseudo_term = PseudoTerminal::new(self.sessions[idx].screen());
         if scroll_offset > 0 {
             pseudo_term = pseudo_term.cursor(tui_term::widget::Cursor::default().visibility(false));
         }
         frame.render_widget(pseudo_term, inner);
 
         // Reset scrollback so parser operates normally
-        self.sessions[idx].parser.screen_mut().set_scrollback(0);
+        self.sessions[idx].set_scrollback(0);
 
         // Render scrollbar when there's scrollback content
         let max_scroll = self.sessions[idx].max_scrollback();
@@ -365,7 +350,7 @@ impl App {
         }
 
         // Render selection highlight by swapping fg/bg colors
-        if let Some(sel) = &self.selection {
+        if let Some(sel) = &self.drag.selection {
             let (start_row, start_col, end_row, end_col) = sel.ordered();
             let buf = frame.buffer_mut();
             for vt_row in start_row..=end_row {
@@ -430,13 +415,13 @@ impl App {
     }
 
     fn render_status(&self, frame: &mut Frame, area: Rect) {
-        let (title, border_style, content) = match &self.input_mode {
+        let (title, border_style, content) = match &self.ui.input_mode {
             InputMode::NamingSession => (
                 " Session name (Esc to cancel) ".to_string(),
                 Style::new().fg(PASTEL_CYAN),
                 Line::from(vec![
                     Span::styled(" > ", Style::new().fg(PASTEL_CYAN).bold()),
-                    Span::raw(&self.input_buffer),
+                    Span::raw(&self.ui.input_buffer),
                 ]),
             ),
             InputMode::RenamingSession => (
@@ -444,7 +429,7 @@ impl App {
                 Style::new().fg(PASTEL_CYAN),
                 Line::from(vec![
                     Span::styled(" > ", Style::new().fg(PASTEL_CYAN).bold()),
-                    Span::raw(&self.input_buffer),
+                    Span::raw(&self.ui.input_buffer),
                 ]),
             ),
             InputMode::NamingRalph => (
@@ -452,7 +437,7 @@ impl App {
                 Style::new().fg(PASTEL_CYAN),
                 Line::from(vec![
                     Span::styled(" > ", Style::new().fg(PASTEL_CYAN).bold()),
-                    Span::raw(&self.input_buffer),
+                    Span::raw(&self.ui.input_buffer),
                 ]),
             ),
             InputMode::EnteringRalphPrompt => (
@@ -460,21 +445,21 @@ impl App {
                 Style::new().fg(PASTEL_CYAN),
                 Line::from(vec![
                     Span::styled(" > ", Style::new().fg(PASTEL_CYAN).bold()),
-                    Span::raw(&self.input_buffer),
+                    Span::raw(&self.ui.input_buffer),
                 ]),
             ),
             InputMode::SelectingSessionType => {
-                let claude_style = if self.selected_cli_type == CliType::Claude {
+                let claude_style = if self.ui.selected_cli_type == CliType::Claude {
                     Style::new().bg(PASTEL_CYAN).fg(Color::Black).bold()
                 } else {
                     Style::default()
                 };
-                let amp_style = if self.selected_cli_type == CliType::Amp {
+                let amp_style = if self.ui.selected_cli_type == CliType::Amp {
                     Style::new().bg(PASTEL_CYAN).fg(Color::Black).bold()
                 } else {
                     Style::default()
                 };
-                let console_style = if self.selected_cli_type == CliType::Console {
+                let console_style = if self.ui.selected_cli_type == CliType::Console {
                     Style::new().bg(PASTEL_CYAN).fg(Color::Black).bold()
                 } else {
                     Style::default()
@@ -498,6 +483,7 @@ impl App {
             }
             _ => {
                 let show_copied = self
+                    .ui
                     .copied_at
                     .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(2));
 
@@ -546,13 +532,13 @@ impl App {
         frame.render_widget(p, area);
 
         if matches!(
-            self.input_mode,
+            self.ui.input_mode,
             InputMode::NamingSession
                 | InputMode::RenamingSession
                 | InputMode::NamingRalph
                 | InputMode::EnteringRalphPrompt
         ) {
-            let x = area.x + 4 + self.input_buffer.len() as u16;
+            let x = area.x + 4 + self.ui.input_buffer.len() as u16;
             let y = area.y + 1;
             frame.set_cursor_position(Position::new(x, y));
         }

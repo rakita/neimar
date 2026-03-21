@@ -1,31 +1,16 @@
 use crate::app::App;
-use crate::session::SessionStatus;
-use std::time::Instant;
-
-pub(crate) enum AppEvent {
-    PtyOutput(usize, Vec<u8>),
-    PtyExited(usize),
-}
+use crate::types::AppEvent;
 
 pub(crate) fn apply_event(app: &mut App, event: AppEvent) {
     match event {
         AppEvent::PtyOutput(id, bytes) => {
-            if let Some(&idx) = app.session_id_map.get(&id)
-                && let Some(session) = app.sessions.get_mut(idx)
-                && session.id == id
-            {
-                session.parser.process(&bytes);
-                session.last_pty_output = Some(Instant::now());
+            if let Some(session) = app.session_by_id_mut(id) {
+                session.process_pty_output(&bytes);
             }
         }
         AppEvent::PtyExited(id) => {
-            if let Some(&idx) = app.session_id_map.get(&id)
-                && let Some(session) = app.sessions.get_mut(idx)
-                && session.id == id
-            {
-                session.status = SessionStatus::Completed;
-                session.pty_writer = None;
-                session.pending_ralph_command = None;
+            if let Some(session) = app.session_by_id_mut(id) {
+                session.mark_exited();
             }
         }
     }

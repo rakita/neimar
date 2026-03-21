@@ -3,11 +3,12 @@ mod event;
 mod input;
 mod mouse;
 mod session;
+mod types;
 mod ui;
 
 use app::App;
 use event::apply_event;
-use session::{CliType, MAX_PTY_EVENTS_PER_FRAME};
+use types::{AppEvent, CliType, MAX_PTY_EVENTS_PER_FRAME};
 
 use crossterm::event::{Event, KeyEventKind};
 use std::time::Duration;
@@ -17,7 +18,7 @@ use tokio::sync::mpsc;
 fn process_frame(
     app: &mut App,
     key_rx: &mut mpsc::UnboundedReceiver<Event>,
-    rx: &mut mpsc::UnboundedReceiver<event::AppEvent>,
+    rx: &mut mpsc::UnboundedReceiver<AppEvent>,
     terminal: &mut ratatui::DefaultTerminal,
 ) -> std::io::Result<()> {
     while let Ok(ev) = key_rx.try_recv() {
@@ -58,8 +59,28 @@ async fn main() -> std::io::Result<()> {
 async fn run(terminal: &mut ratatui::DefaultTerminal) -> std::io::Result<()> {
     crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture)?;
 
+    // Set terminal title to parent/folder name
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut components = cwd.components().rev();
+        let folder = components
+            .next()
+            .map(|c| c.as_os_str().to_string_lossy().to_string());
+        let parent = components
+            .next()
+            .map(|c| c.as_os_str().to_string_lossy().to_string());
+        let title = match (parent, folder) {
+            (Some(p), Some(f)) => format!("{}/{}", p, f),
+            (None, Some(f)) => f,
+            _ => "neimar".to_string(),
+        };
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::SetTitle(&title)
+        );
+    }
+
     let (key_tx, mut key_rx) = mpsc::unbounded_channel::<Event>();
-    let (tx, mut rx) = mpsc::unbounded_channel::<event::AppEvent>();
+    let (tx, mut rx) = mpsc::unbounded_channel::<AppEvent>();
 
     // Dedicated OS thread for keyboard/mouse reading — never blocked by tokio scheduler
     std::thread::spawn(move || {
@@ -85,8 +106,8 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> std::io::Result<()> {
 
     let mut app = App::new(tx);
     terminal.draw(|frame| app.render(frame))?;
-    let (rows, cols) = if app.last_right_panel_size.0 > 0 {
-        app.last_right_panel_size
+    let (rows, cols) = if app.layout.last_right_panel_size.0 > 0 {
+        app.layout.last_right_panel_size
     } else {
         (24, 80)
     };
