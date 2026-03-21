@@ -1,5 +1,5 @@
 use crate::app::App;
-use crate::types::{CliType, Focus, InputMode, LeftTab, SessionState};
+use crate::types::{CliType, Focus, InputMode, LeftTab, SessionState, SidebarItem};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Position, Rect},
@@ -98,81 +98,134 @@ impl App {
         // Inner width available for content (panel width minus borders and highlight symbol)
         let inner_width = area.width.saturating_sub(4) as usize; // 2 border + 2 highlight
 
-        let vis = self.visible_sessions();
-        let items: Vec<ListItem> = vis
+        // Precompute which sidebar indices are indented (sessions under a label)
+        let indented: Vec<bool> = {
+            let mut under_label = false;
+            self.sidebar_items.iter().map(|item| match item {
+                SidebarItem::Label(_) => { under_label = true; false }
+                SidebarItem::Session(_) => under_label,
+            }).collect()
+        };
+        const INDENT: usize = 2;
+
+        let drag_info = self.drag.dragging_session.as_ref().map(|ds| (ds.from_index, ds.target_index));
+        let items: Vec<ListItem> = self
+            .sidebar_items
             .iter()
-            .map(|&idx| {
-                let s = &self.sessions[idx];
-                let state = s.inferred_state();
-
-                let state_emoji = state.label().to_string();
-
-                let name_style = Style::default();
-
-                // Line 1: [MODE_EMOJI][TYPE_EMOJI] name (left) + ai_state + state_emoji + metadata (right-aligned)
-                let mode_emoji = s.permission_mode.emoji();
-                let left_prefix_width = if mode_emoji.is_empty() { 0 } else { display_width(mode_emoji) + 1 };
-                let display_name: String = format!("{} {}", s.cli_type.emoji(), s.name);
-
-                // Build right-side components: AI text label + state emoji + metadata
-                let ai_label = if !matches!(state, SessionState::Starting) {
-                    Some(format!("{} {}", state_emoji, state.text_label()))
-                } else {
-                    None
-                };
-                let ai_color = state.color();
-                let metadata_text = {
-                    let mode_label = s.permission_mode.label();
-                    mode_label.to_string()
-                };
-
-                let right_width = match (&ai_label, metadata_text.is_empty()) {
-                    (Some(ai), false) => display_width(ai.as_str()) + 1 + metadata_text.len(),
-                    (Some(ai), true) => display_width(ai.as_str()),
-                    (None, false) => metadata_text.len(),
-                    (None, true) => 0,
-                };
-
-                let name_max = inner_width
-                    .saturating_sub(left_prefix_width)
-                    .saturating_sub(if right_width == 0 { 0 } else { right_width + 1 });
-                let display_name: String = {
-                    let mut w = 0;
-                    display_name.chars().take_while(|c| {
-                        w += char_width(*c);
-                        w <= name_max
-                    }).collect()
-                };
-                let used = left_prefix_width + display_width(display_name.as_str()) + right_width;
-                let pad1 = inner_width.saturating_sub(used).saturating_sub(1);
-                let mut line1_spans = vec![];
-                if !mode_emoji.is_empty() {
-                    line1_spans.push(Span::raw(format!("{} ", mode_emoji)));
+            .enumerate()
+            .map(|(sidebar_idx, item)| match item {
+                SidebarItem::Label(label_id) => {
+                    let label_name = self
+                        .labels
+                        .get(label_id)
+                        .map(|s| s.as_str())
+                        .unwrap_or("?");
+                    // Render centered: ── Label Name ──
+                    let name_width = display_width(label_name);
+                    let total_pad = inner_width.saturating_sub(name_width + 2); // 2 for spaces around name
+                    let left_pad = total_pad / 2;
+                    let right_pad = total_pad - left_pad;
+                    let line = Line::from(vec![
+                        Span::styled(
+                            "─".repeat(left_pad),
+                            Style::new().fg(Color::DarkGray),
+                        ),
+                        Span::styled(
+                            format!(" {} ", label_name),
+                            Style::new().fg(Color::White).bold(),
+                        ),
+                        Span::styled(
+                            "─".repeat(right_pad),
+                            Style::new().fg(Color::DarkGray),
+                        ),
+                    ]);
+                    ListItem::new(vec![line])
                 }
-                line1_spans.extend([
-                    Span::styled(display_name, name_style),
-                    Span::raw(" ".repeat(pad1)),
-                ]);
-                if let Some(ref ai) = ai_label {
-                    line1_spans.push(Span::styled(
-                        ai.clone(),
-                        Style::new().fg(ai_color).bold(),
-                    ));
-                    if !metadata_text.is_empty() {
+                SidebarItem::Session(session_id) => {
+                    let Some(&idx) = self.session_id_map.get(session_id) else {
+                        return ListItem::new(vec![Line::from("?")]);
+                    };
+                    let s: &crate::session::Session = &self.sessions[idx];
+                    let state = s.inferred_state();
+                    let is_indented = indented[sidebar_idx];
+                    let effective_width = if is_indented { inner_width.saturating_sub(INDENT) } else { inner_width };
+
+                    let state_emoji = state.label().to_string();
+                    let name_style = Style::default();
+
+                    let mode_emoji = s.permission_mode.emoji();
+                    let left_prefix_width = if mode_emoji.is_empty() { 0 } else { display_width(mode_emoji) + 1 };
+                    let display_name: String = format!("{} {}", s.cli_type.emoji(), s.name);
+
+                    let ai_label = if !matches!(state, SessionState::Starting) {
+                        Some(format!("{} {}", state_emoji, state.text_label()))
+                    } else {
+                        None
+                    };
+                    let ai_color = state.color();
+                    let metadata_text = {
+                        let mode_label = s.permission_mode.label();
+                        mode_label.to_string()
+                    };
+
+                    let ai_label_width = ai_label.as_ref().map(|s| display_width(s.as_str())).unwrap_or(0);
+                    let right_width = match (&ai_label, metadata_text.is_empty()) {
+                        (Some(_), false) => ai_label_width + 1 + metadata_text.len(),
+                        (Some(_), true) => ai_label_width,
+                        (None, false) => metadata_text.len(),
+                        (None, true) => 0,
+                    };
+
+                    let name_max = effective_width
+                        .saturating_sub(left_prefix_width)
+                        .saturating_sub(if right_width == 0 { 0 } else { right_width + 1 });
+                    let display_name: String = {
+                        let mut w = 0;
+                        display_name.chars().take_while(|c| {
+                            w += char_width(*c);
+                            w <= name_max
+                        }).collect()
+                    };
+                    let used = left_prefix_width + display_width(display_name.as_str()) + right_width;
+                    let pad1 = effective_width.saturating_sub(used).saturating_sub(1);
+                    let mut line1_spans = vec![];
+                    if is_indented {
+                        line1_spans.push(Span::raw(" ".repeat(INDENT)));
+                    }
+                    if !mode_emoji.is_empty() {
+                        line1_spans.push(Span::raw(format!("{} ", mode_emoji)));
+                    }
+                    line1_spans.extend([
+                        Span::styled(display_name, name_style),
+                        Span::raw(" ".repeat(pad1)),
+                    ]);
+                    if let Some(ref ai) = ai_label {
                         line1_spans.push(Span::styled(
-                            format!(" {}", metadata_text),
+                            ai.clone(),
+                            Style::new().fg(ai_color).bold(),
+                        ));
+                        if !metadata_text.is_empty() {
+                            line1_spans.push(Span::styled(
+                                format!(" {}", metadata_text),
+                                Style::new().fg(Color::DarkGray),
+                            ));
+                        }
+                    } else if !metadata_text.is_empty() {
+                        line1_spans.push(Span::styled(
+                            metadata_text,
                             Style::new().fg(Color::DarkGray),
                         ));
                     }
-                } else if !metadata_text.is_empty() {
-                    line1_spans.push(Span::styled(
-                        metadata_text,
-                        Style::new().fg(Color::DarkGray),
-                    ));
-                }
-                let line1 = Line::from(line1_spans);
+                    let line1 = Line::from(line1_spans);
 
-                ListItem::new(vec![line1])
+                    let mut item = ListItem::new(vec![line1]);
+                    if let Some((from, _to)) = drag_info {
+                        if sidebar_idx == from {
+                            item = item.style(Style::new().fg(Color::DarkGray));
+                        }
+                    }
+                    item
+                }
             })
             .collect();
 
@@ -194,11 +247,12 @@ impl App {
 
         frame.render_stateful_widget(list, area, &mut self.list_state);
 
-        // Render scrollbar when sessions overflow the visible area
-        let inner_height = area.height.saturating_sub(2) as usize; // minus top/bottom border
-        if vis.len() > inner_height && inner_height > 0 {
+        // Render scrollbar when items overflow the visible area
+        let inner_height = area.height.saturating_sub(2) as usize;
+        let item_count = self.sidebar_items.len();
+        if item_count > inner_height && inner_height > 0 {
             let inner = area.inner(ratatui::layout::Margin::new(1, 1));
-            let mut scrollbar_state = ScrollbarState::new(vis.len())
+            let mut scrollbar_state = ScrollbarState::new(item_count)
                 .position(self.list_state.offset());
             let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
                 .thumb_style(Style::new().fg(Color::DarkGray))
@@ -449,6 +503,14 @@ impl App {
                     Span::raw(&self.ui.input_buffer),
                 ]),
             ),
+            InputMode::NamingLabel => (
+                " Label name (Esc to cancel) ".to_string(),
+                Style::new().fg(PASTEL_CYAN),
+                Line::from(vec![
+                    Span::styled(" > ", Style::new().fg(PASTEL_CYAN).bold()),
+                    Span::raw(&self.ui.input_buffer),
+                ]),
+            ),
             InputMode::SelectingSessionType => {
                 let style_for = |t: CliType| {
                     if self.ui.selected_cli_type == t {
@@ -502,6 +564,8 @@ impl App {
                         Span::raw(": ralph  "),
                         Span::styled("e", Style::new().fg(Color::Yellow).bold()),
                         Span::raw(": rename  "),
+                        Span::styled("g", Style::new().fg(Color::Yellow).bold()),
+                        Span::raw(": label  "),
                         Span::styled("r", Style::new().fg(Color::Yellow).bold()),
                         Span::raw(": remove  "),
                         Span::styled("h", Style::new().fg(Color::Yellow).bold()),
@@ -532,6 +596,7 @@ impl App {
                 | InputMode::RenamingSession
                 | InputMode::NamingRalph
                 | InputMode::EnteringRalphPrompt
+                | InputMode::NamingLabel
         ) {
             let x = area.x + 4 + self.ui.input_buffer.len() as u16;
             let y = area.y + 1;

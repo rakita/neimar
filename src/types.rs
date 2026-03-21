@@ -148,6 +148,14 @@ impl PermissionMode {
     }
 }
 
+// ── Sidebar Items ───────────────────────────────────────
+
+#[derive(Clone, PartialEq)]
+pub(crate) enum SidebarItem {
+    Label(usize),   // label id
+    Session(usize), // session id
+}
+
 // ── Focus & Input Mode ───────────────────────────────────
 
 #[derive(PartialEq)]
@@ -163,6 +171,7 @@ pub(crate) enum InputMode {
     SelectingSessionType,
     NamingRalph,
     EnteringRalphPrompt,
+    NamingLabel,
 }
 
 #[derive(PartialEq)]
@@ -229,11 +238,17 @@ pub(crate) struct LayoutCache {
     pub(crate) last_right_panel_inner: Rect,
 }
 
+pub(crate) struct DraggingSession {
+    pub(crate) from_index: usize,
+    pub(crate) target_index: usize,
+}
+
 pub(crate) struct DragState {
     pub(crate) selection: Option<Selection>,
     pub(crate) dragging_divider: bool,
     pub(crate) dragging_scrollbar: bool,
     pub(crate) dragging_sessions_scrollbar: bool,
+    pub(crate) dragging_session: Option<DraggingSession>,
 }
 
 // ── Claude Status (from statusline) ──────────────────────

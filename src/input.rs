@@ -1,7 +1,8 @@
 use crate::app::App;
 use crate::mouse;
 use crate::types::{
-    CliType, Focus, InputMode, LeftTab, RalphConfig, Selection, SESSION_ITEM_HEIGHT,
+    CliType, DraggingSession, Focus, InputMode, LeftTab, RalphConfig, Selection, SidebarItem,
+    SESSION_ITEM_HEIGHT,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
@@ -89,6 +90,10 @@ impl App {
                 self.handle_ralph_prompt_key(key);
                 return;
             }
+            InputMode::NamingLabel => {
+                self.handle_naming_label_key(key);
+                return;
+            }
             InputMode::Normal => {}
         }
 
@@ -103,6 +108,18 @@ impl App {
                 KeyCode::Right => {
                     if self.ui.left_tab == LeftTab::Sessions && self.selected_session().is_some() {
                         self.ui.focus = Focus::Terminal;
+                    }
+                    return;
+                }
+                KeyCode::Up => {
+                    if self.ui.left_tab == LeftTab::Sessions {
+                        self.move_sidebar_item_up();
+                    }
+                    return;
+                }
+                KeyCode::Down => {
+                    if self.ui.left_tab == LeftTab::Sessions {
+                        self.move_sidebar_item_down();
                     }
                     return;
                 }
@@ -148,13 +165,28 @@ impl App {
                 self.ui.input_mode = InputMode::NamingRalph;
                 self.ui.input_buffer.clear();
             }
+            KeyCode::Char('g') => {
+                self.ui.input_mode = InputMode::NamingLabel;
+                self.ui.input_buffer.clear();
+            }
             KeyCode::Char('r') => {
-                self.remove_selected_session();
+                self.remove_selected_sidebar_item();
             }
             KeyCode::Char('e') => {
-                if let Some(real_idx) = self.selected_real_index() {
-                    self.ui.input_mode = InputMode::RenamingSession;
-                    self.ui.input_buffer = self.sessions[real_idx].name.clone();
+                match self.selected_sidebar_item().cloned() {
+                    Some(SidebarItem::Session(_)) => {
+                        if let Some(real_idx) = self.selected_real_index() {
+                            self.ui.input_mode = InputMode::RenamingSession;
+                            self.ui.input_buffer = self.sessions[real_idx].name.clone();
+                        }
+                    }
+                    Some(SidebarItem::Label(label_id)) => {
+                        if let Some(name) = self.labels.get(&label_id) {
+                            self.ui.input_mode = InputMode::RenamingSession;
+                            self.ui.input_buffer = name.clone();
+                        }
+                    }
+                    None => {}
                 }
             }
             KeyCode::Char('h') => {
@@ -169,25 +201,25 @@ impl App {
             }
             KeyCode::Up => {
                 self.drag.selection = None;
-                let vis = self.visible_sessions();
+                let count = self.sidebar_items.len();
                 if let Some(sel) = self.list_state.selected() {
                     if sel > 0 {
                         self.list_state.select(Some(sel - 1));
-                    } else if !vis.is_empty() {
-                        self.list_state.select(Some(vis.len() - 1));
+                    } else if count > 0 {
+                        self.list_state.select(Some(count - 1));
                     }
                 }
             }
             KeyCode::Down => {
                 self.drag.selection = None;
-                let vis = self.visible_sessions();
+                let count = self.sidebar_items.len();
                 if let Some(sel) = self.list_state.selected() {
-                    if sel + 1 < vis.len() {
+                    if sel + 1 < count {
                         self.list_state.select(Some(sel + 1));
                     } else {
                         self.list_state.select(Some(0));
                     }
-                } else if !vis.is_empty() {
+                } else if count > 0 {
                     self.list_state.select(Some(0));
                 }
             }
@@ -265,8 +297,18 @@ impl App {
             KeyCode::Enter => {
                 if !self.ui.input_buffer.is_empty() {
                     let new_name = self.ui.input_buffer.clone();
-                    if let Some(session) = self.selected_session_mut() {
-                        session.name = new_name;
+                    match self.selected_sidebar_item().cloned() {
+                        Some(SidebarItem::Session(_)) => {
+                            if let Some(session) = self.selected_session_mut() {
+                                session.name = new_name;
+                            }
+                        }
+                        Some(SidebarItem::Label(label_id)) => {
+                            if let Some(name) = self.labels.get_mut(&label_id) {
+                                *name = new_name;
+                            }
+                        }
+                        None => {}
                     }
                 }
                 self.ui.input_mode = InputMode::Normal;
@@ -397,6 +439,28 @@ impl App {
         }
     }
 
+    fn handle_naming_label_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Enter => {
+                if !self.ui.input_buffer.is_empty() {
+                    let name = self.ui.input_buffer.clone();
+                    self.create_label(name);
+                }
+                self.ui.input_mode = InputMode::Normal;
+                self.ui.input_buffer.clear();
+            }
+            KeyCode::Esc => {
+                self.ui.input_mode = InputMode::Normal;
+                self.ui.input_buffer.clear();
+            }
+            KeyCode::Char(c) => self.ui.input_buffer.push(c),
+            KeyCode::Backspace => {
+                self.ui.input_buffer.pop();
+            }
+            _ => {}
+        }
+    }
+
     fn handle_terminal_key(&mut self, key: KeyEvent) {
         // Cmd+C with active selection: copy to clipboard instead of sending to PTY
         let is_copy = key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::SUPER);
@@ -469,10 +533,10 @@ impl App {
                 // Check if clicking on the sessions scrollbar (rightmost column of sessions inner area)
                 if self.ui.left_tab == LeftTab::Sessions {
                     let sess_inner = self.layout.last_sessions_area.inner(ratatui::layout::Margin::new(1, 1));
-                    let vis = self.visible_sessions();
+                    let item_count = self.sidebar_items.len();
                     if sess_inner.width > 0
                         && sess_inner.height > 1
-                        && vis.len() > sess_inner.height as usize
+                        && item_count > sess_inner.height as usize
                         && event.column == sess_inner.x + sess_inner.width - 1
                         && event.row >= sess_inner.y
                         && event.row < sess_inner.y + sess_inner.height
@@ -480,8 +544,8 @@ impl App {
                         let y_ratio = (event.row - sess_inner.y) as f64
                             / (sess_inner.height - 1).max(1) as f64;
                         let y_ratio = y_ratio.clamp(0.0, 1.0);
-                        let target = (y_ratio * (vis.len() - 1) as f64).round() as usize;
-                        self.list_state.select(Some(target.min(vis.len() - 1)));
+                        let target = (y_ratio * (item_count - 1) as f64).round() as usize;
+                        self.list_state.select(Some(target.min(item_count - 1)));
                         self.drag.dragging_sessions_scrollbar = true;
                         self.drag.selection = None;
                         return;
@@ -493,18 +557,22 @@ impl App {
 
                 match self.ui.left_tab {
                     LeftTab::Sessions => {
-                        let vis_count = self.visible_sessions().len();
+                        let item_count = self.sidebar_items.len();
                         let scroll_offset = self.list_state.offset();
                         if let Some(index) = mouse::clicked_session_index(
                             event.column,
                             event.row,
                             self.layout.last_sessions_area,
-                            vis_count,
+                            item_count,
                             SESSION_ITEM_HEIGHT,
                             scroll_offset,
                         ) {
                             self.list_state.select(Some(index));
                             self.ui.focus = Focus::Sessions;
+                            self.drag.dragging_session = Some(DraggingSession {
+                                from_index: index,
+                                target_index: index,
+                            });
                         }
                     }
                     LeftTab::Agents => {
@@ -578,14 +646,14 @@ impl App {
                 // Handle sessions scrollbar dragging
                 if self.drag.dragging_sessions_scrollbar {
                     let sess_inner = self.layout.last_sessions_area.inner(ratatui::layout::Margin::new(1, 1));
-                    let vis = self.visible_sessions();
-                    if sess_inner.height > 1 && !vis.is_empty() {
+                    let item_count = self.sidebar_items.len();
+                    if sess_inner.height > 1 && item_count > 0 {
                         let clamped_row = event.row.max(sess_inner.y).min(sess_inner.y + sess_inner.height - 1);
                         let y_ratio = (clamped_row - sess_inner.y) as f64
                             / (sess_inner.height - 1).max(1) as f64;
                         let y_ratio = y_ratio.clamp(0.0, 1.0);
-                        let target = (y_ratio * (vis.len() - 1) as f64).round() as usize;
-                        self.list_state.select(Some(target.min(vis.len() - 1)));
+                        let target = (y_ratio * (item_count - 1) as f64).round() as usize;
+                        self.list_state.select(Some(target.min(item_count - 1)));
                     }
                     return;
                 }
@@ -603,6 +671,28 @@ impl App {
                                 ((1.0 - y_ratio) * max_scroll as f64).round() as usize;
                         }
                     }
+                    return;
+                }
+                // Handle session dragging
+                if self.drag.dragging_session.is_some() {
+                    let item_count = self.sidebar_items.len();
+                    let scroll_offset = self.list_state.offset();
+                    let target = mouse::clicked_session_index(
+                        event.column,
+                        event.row,
+                        self.layout.last_sessions_area,
+                        item_count,
+                        SESSION_ITEM_HEIGHT,
+                        scroll_offset,
+                    )
+                    .unwrap_or_else(|| {
+                        // If mouse is below items, clamp to last index
+                        item_count.saturating_sub(1)
+                    });
+                    if let Some(ds) = &mut self.drag.dragging_session {
+                        ds.target_index = target;
+                    }
+                    self.list_state.select(Some(target));
                     return;
                 }
                 // Update selection end point, clamped to inner rect bounds
@@ -624,6 +714,9 @@ impl App {
                 self.drag.dragging_divider = false;
                 self.drag.dragging_scrollbar = false;
                 self.drag.dragging_sessions_scrollbar = false;
+                if let Some(ds) = self.drag.dragging_session.take() {
+                    self.move_sidebar_item(ds.from_index, ds.target_index);
+                }
                 // Auto-copy selection to clipboard on mouse-up if it's a real drag (not just a click)
                 if let Some(sel) = &self.drag.selection {
                     let (sr, sc, er, ec) = sel.ordered();
@@ -672,9 +765,9 @@ impl App {
                     && self.ui.left_tab == LeftTab::Sessions
                 {
                     // Move selection down (which auto-scrolls the list viewport)
-                    let vis = self.visible_sessions();
+                    let count = self.sidebar_items.len();
                     if let Some(sel) = self.list_state.selected() {
-                        if sel + 1 < vis.len() {
+                        if sel + 1 < count {
                             self.list_state.select(Some(sel + 1));
                         }
                     }

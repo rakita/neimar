@@ -1,7 +1,7 @@
 use crate::session::Session;
 use crate::types::{
     AgentFile, AppEvent, CliType, DragState, Focus, InputMode, LayoutCache, LeftTab, RalphConfig,
-    SessionStatus, STATUS_POLL_INTERVAL, UiState,
+    SessionStatus, SidebarItem, STATUS_POLL_INTERVAL, UiState,
 };
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use ratatui::layout::Rect;
@@ -19,9 +19,14 @@ const RALPH_MAX_WAIT: Duration = Duration::from_secs(10);
 pub(crate) struct App {
     // Session management
     pub(crate) sessions: Vec<Session>,
-    session_id_map: HashMap<usize, usize>,
+    pub(crate) session_id_map: HashMap<usize, usize>,
     pub(crate) list_state: ListState,
     next_session_id: usize,
+
+    // Labels & sidebar ordering
+    pub(crate) labels: HashMap<usize, String>,
+    pub(crate) sidebar_items: Vec<SidebarItem>,
+    next_label_id: usize,
 
     // Agents
     pub(crate) agents: Vec<AgentFile>,
@@ -51,6 +56,9 @@ impl App {
             session_id_map: HashMap::new(),
             list_state: ListState::default(),
             next_session_id: 0,
+            labels: HashMap::new(),
+            sidebar_items: Vec::new(),
+            next_label_id: 0,
             agents,
             agent_list_state,
             agent_scroll_offset: 0,
@@ -76,6 +84,7 @@ impl App {
                 dragging_divider: false,
                 dragging_scrollbar: false,
                 dragging_sessions_scrollbar: false,
+                dragging_session: None,
             },
             event_tx,
             should_quit: false,
@@ -121,6 +130,33 @@ impl App {
         self.session_id_map.clear();
         for (idx, session) in self.sessions.iter().enumerate() {
             self.session_id_map.insert(session.id, idx);
+        }
+    }
+
+    pub(crate) fn move_sidebar_item(&mut self, from: usize, to: usize) {
+        if from == to || from >= self.sidebar_items.len() || to >= self.sidebar_items.len() {
+            return;
+        }
+        // When dragging a label, move the entire group (label + its sessions)
+        if matches!(self.sidebar_items[from], SidebarItem::Label(_)) {
+            let range = self.label_group_range(from);
+            let group: Vec<_> = self.sidebar_items.drain(range.clone()).collect();
+            let group_len = group.len();
+            // Adjust target for the removal: if target was after the group, shift back
+            let adjusted_to = if to > range.start {
+                to.saturating_sub(group_len).min(self.sidebar_items.len())
+            } else {
+                to.min(self.sidebar_items.len())
+            };
+            // Splice the group back at the adjusted position
+            for (i, item) in group.into_iter().enumerate() {
+                self.sidebar_items.insert(adjusted_to + i, item);
+            }
+            self.list_state.select(Some(adjusted_to));
+        } else {
+            let item = self.sidebar_items.remove(from);
+            self.sidebar_items.insert(to, item);
+            self.list_state.select(Some(to));
         }
     }
 
@@ -201,9 +237,7 @@ impl App {
                 session.process_pty_output(
                     format!("Failed to open PTY: {}\r\n", e).as_bytes(),
                 );
-                self.sessions.push(session);
-                self.rebuild_session_id_map();
-                self.select_last_session();
+                self.push_session_to_sidebar(session);
                 return id;
             }
         };
@@ -244,9 +278,7 @@ impl App {
                 session.process_pty_output(
                     format!("Failed to spawn {}: {}\r\n", cli_type.command(), e).as_bytes(),
                 );
-                self.sessions.push(session);
-                self.rebuild_session_id_map();
-                self.select_last_session();
+                self.push_session_to_sidebar(session);
                 return id;
             }
         };
@@ -287,34 +319,37 @@ impl App {
             is_ralph,
         );
 
-        self.sessions.push(session);
-        self.rebuild_session_id_map();
-        self.select_last_session();
+        self.push_session_to_sidebar(session);
         self.ui.focus = Focus::Terminal;
         id
     }
 
-    fn select_last_session(&mut self) {
-        let vis = self.visible_sessions();
-        let new_real_idx = self.sessions.len() - 1;
-        let vis_idx = vis
-            .iter()
-            .position(|&i| i == new_real_idx)
-            .unwrap_or(vis.len().saturating_sub(1));
-        self.list_state.select(Some(vis_idx));
+    /// Push a session to storage and insert it into the sidebar at the right position.
+    fn push_session_to_sidebar(&mut self, session: Session) -> usize {
+        let id = session.id;
+        self.sessions.push(session);
+        self.rebuild_session_id_map();
+        let insert_pos = self.sidebar_insert_position();
+        self.sidebar_items
+            .insert(insert_pos, SidebarItem::Session(id));
+        self.list_state.select(Some(insert_pos));
+        insert_pos
     }
 
-    // ── Session queries ──────────────────────────────────
+    // ── Sidebar & session queries ────────────────────────
 
-    /// Returns real indices into `self.sessions` for sessions that should be displayed.
-    pub(crate) fn visible_sessions(&self) -> Vec<usize> {
-        (0..self.sessions.len()).collect()
+    pub(crate) fn selected_sidebar_item(&self) -> Option<&SidebarItem> {
+        self.list_state
+            .selected()
+            .and_then(|i| self.sidebar_items.get(i))
     }
 
-    /// Map the current visible selection to a real session index.
+    /// Map the current selection to a real session index (None if a label is selected).
     pub(crate) fn selected_real_index(&self) -> Option<usize> {
-        let vis = self.visible_sessions();
-        self.list_state.selected().and_then(|i| vis.get(i).copied())
+        match self.selected_sidebar_item()? {
+            SidebarItem::Session(id) => self.session_id_map.get(id).copied(),
+            SidebarItem::Label(_) => None,
+        }
     }
 
     pub(crate) fn selected_session(&self) -> Option<&Session> {
@@ -327,23 +362,125 @@ impl App {
         idx.and_then(|i| self.sessions.get_mut(i))
     }
 
+    // ── Label management ─────────────────────────────────
+
+    pub(crate) fn create_label(&mut self, name: String) {
+        let id = self.next_label_id;
+        self.next_label_id += 1;
+        self.labels.insert(id, name);
+        let insert_pos = self.sidebar_insert_position();
+        self.sidebar_items.insert(insert_pos, SidebarItem::Label(id));
+        self.list_state.select(Some(insert_pos));
+    }
+
+    /// Returns the range in sidebar_items for a label group (the label + its sessions).
+    pub(crate) fn label_group_range(&self, label_pos: usize) -> std::ops::Range<usize> {
+        let end = self.sidebar_items[label_pos + 1..]
+            .iter()
+            .position(|item| matches!(item, SidebarItem::Label(_)))
+            .map(|p| label_pos + 1 + p)
+            .unwrap_or(self.sidebar_items.len());
+        label_pos..end
+    }
+
+    /// Where to insert a new sidebar item (after current selection, respecting label groups).
+    fn sidebar_insert_position(&self) -> usize {
+        if let Some(sel) = self.list_state.selected() {
+            if sel < self.sidebar_items.len() {
+                match &self.sidebar_items[sel] {
+                    SidebarItem::Label(_) => self.label_group_range(sel).end,
+                    SidebarItem::Session(_) => sel + 1,
+                }
+            } else {
+                self.sidebar_items.len()
+            }
+        } else {
+            self.sidebar_items.len()
+        }
+    }
+
+    pub(crate) fn move_sidebar_item_up(&mut self) {
+        let Some(sel) = self.list_state.selected() else {
+            return;
+        };
+        if sel == 0 {
+            return;
+        }
+        match &self.sidebar_items[sel] {
+            SidebarItem::Session(_) => {
+                self.sidebar_items.swap(sel, sel - 1);
+                self.list_state.select(Some(sel - 1));
+            }
+            SidebarItem::Label(_) => {
+                let range = self.label_group_range(sel);
+                if range.start == 0 {
+                    return;
+                }
+                // Swap the item above the group into the end of the group
+                let above = self.sidebar_items.remove(range.start - 1);
+                self.sidebar_items.insert(range.end - 1, above);
+                self.list_state.select(Some(sel - 1));
+            }
+        }
+    }
+
+    pub(crate) fn move_sidebar_item_down(&mut self) {
+        let Some(sel) = self.list_state.selected() else {
+            return;
+        };
+        if sel >= self.sidebar_items.len() - 1 {
+            return;
+        }
+        match &self.sidebar_items[sel] {
+            SidebarItem::Session(_) => {
+                self.sidebar_items.swap(sel, sel + 1);
+                self.list_state.select(Some(sel + 1));
+            }
+            SidebarItem::Label(_) => {
+                let range = self.label_group_range(sel);
+                if range.end >= self.sidebar_items.len() {
+                    return;
+                }
+                // Move the item below the group to just before the label
+                let below = self.sidebar_items.remove(range.end);
+                self.sidebar_items.insert(range.start, below);
+                self.list_state.select(Some(sel + 1));
+            }
+        }
+    }
+
     // ── Session removal & cleanup ────────────────────────
 
-    pub(crate) fn remove_selected_session(&mut self) {
-        if let Some(real_idx) = self.selected_real_index() {
-            let status_path = self.sessions[real_idx].status_file_path().to_path_buf();
-            Self::cleanup_status_file(&status_path);
-            self.sessions.remove(real_idx);
-            self.rebuild_session_id_map();
-            let vis = self.visible_sessions();
-            if vis.is_empty() {
-                self.list_state.select(None);
-                self.ui.focus = Focus::Sessions;
-            } else {
-                let sel = self.list_state.selected().unwrap_or(0);
-                if sel >= vis.len() {
-                    self.list_state.select(Some(vis.len() - 1));
+    pub(crate) fn remove_selected_sidebar_item(&mut self) {
+        let Some(sel) = self.list_state.selected() else {
+            return;
+        };
+        let Some(item) = self.sidebar_items.get(sel).cloned() else {
+            return;
+        };
+        match item {
+            SidebarItem::Session(id) => {
+                if let Some(&real_idx) = self.session_id_map.get(&id) {
+                    let status_path = self.sessions[real_idx].status_file_path().to_path_buf();
+                    Self::cleanup_status_file(&status_path);
+                    self.sessions.remove(real_idx);
+                    self.rebuild_session_id_map();
                 }
+                self.sidebar_items.remove(sel);
+            }
+            SidebarItem::Label(label_id) => {
+                // Remove just the label, sessions underneath stay (become unlabeled)
+                self.labels.remove(&label_id);
+                self.sidebar_items.remove(sel);
+            }
+        }
+        if self.sidebar_items.is_empty() {
+            self.list_state.select(None);
+            self.ui.focus = Focus::Sessions;
+        } else {
+            let sel = self.list_state.selected().unwrap_or(0);
+            if sel >= self.sidebar_items.len() {
+                self.list_state.select(Some(self.sidebar_items.len() - 1));
             }
         }
     }
