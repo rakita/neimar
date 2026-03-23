@@ -55,7 +55,7 @@ fn is_wide_emoji(c: char) -> bool {
         | '\u{1F4CB}' // 📋 (Planned state)
         | '\u{1F7E2}' // 🟢 (Done state)
         | '\u{1F512}' // 🔒 (Closed state)
-        | '\u{1F513}' // 🔓 (Dangerous mode)
+        | '\u{1F4A5}' // 💥 (Dangerous mode)
         | '\u{1F534}' // 🔴 (Failed state)
     )
 }
@@ -526,7 +526,7 @@ impl App {
                         Span::raw("  "),
                         Span::styled(" 1: 🤖 claude ", style_for(CliType::Claude)),
                         Span::raw(" "),
-                        Span::styled(" 2: 🤖🔓 claude danger-accept-permissions ", style_for(CliType::ClaudeDangerous)),
+                        Span::styled(" 2: 🤖💥 claude danger-accept-permissions ", style_for(CliType::ClaudeDangerous)),
                         Span::raw(" "),
                         Span::styled(" 3: ⚡ amp ", style_for(CliType::Amp)),
                         Span::raw(" "),

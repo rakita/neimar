@@ -45,7 +45,7 @@ impl CliType {
     pub(crate) fn emoji(&self) -> &'static str {
         match self {
             CliType::Claude => "🤖",
-            CliType::ClaudeDangerous => "🤖🔓",
+            CliType::ClaudeDangerous => "🤖💥",
             CliType::Amp => "⚡",
             CliType::Console => "🖥️",
         }
