@@ -111,7 +111,9 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> std::io::Result<()> {
     } else {
         (24, 80)
     };
-    app.create_session("Session 1".to_string(), CliType::Claude, rows, cols);
+    app.create_session("claude skip-permissions".to_string(), CliType::ClaudeDangerous, rows, cols);
+    app.create_session("claude".to_string(), CliType::Claude, rows, cols);
+    app.create_session("console".to_string(), CliType::Console, rows, cols);
     let mut render_interval = tokio::time::interval(Duration::from_millis(33));
     render_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
