@@ -1,10 +1,11 @@
 use crate::app::App;
 use crate::mouse;
 use crate::types::{
-    CliType, DraggingSession, Focus, InputMode, LeftTab, RalphConfig, Selection, SidebarItem,
+    CliType, DraggingSession, Focus, InputMode, LeftTab, Selection, SidebarItem,
     SESSION_ITEM_HEIGHT,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use std::time::{Duration, Instant};
 
 // ── Key to terminal bytes ───────────────────────────────
 
@@ -82,19 +83,26 @@ impl App {
                 self.handle_renaming_key(key);
                 return;
             }
-            InputMode::NamingRalph => {
-                self.handle_naming_ralph_key(key);
-                return;
-            }
-            InputMode::EnteringRalphPrompt => {
-                self.handle_ralph_prompt_key(key);
-                return;
-            }
             InputMode::NamingLabel => {
                 self.handle_naming_label_key(key);
                 return;
             }
             InputMode::Normal => {}
+        }
+
+        // BackTab (Shift+Tab): switch to previous session
+        if key.code == KeyCode::BackTab {
+            let count = self.sidebar_items.len();
+            if let Some(sel) = self.list_state.selected() {
+                if sel > 0 {
+                    self.list_state.select(Some(sel - 1));
+                } else if count > 0 {
+                    self.list_state.select(Some(count - 1));
+                }
+            }
+            self.ui.focus = Focus::Terminal;
+            self.ui.left_tab = LeftTab::Sessions;
+            return;
         }
 
         // Shift+Arrow/Page keys work regardless of current panel
@@ -161,10 +169,6 @@ impl App {
                 self.ui.input_mode = InputMode::SelectingSessionType;
                 self.ui.selected_cli_type = CliType::Claude;
             }
-            KeyCode::Char('l') => {
-                self.ui.input_mode = InputMode::NamingRalph;
-                self.ui.input_buffer.clear();
-            }
             KeyCode::Char('g') => {
                 self.ui.input_mode = InputMode::NamingLabel;
                 self.ui.input_buffer.clear();
@@ -187,12 +191,6 @@ impl App {
                         }
                     }
                     None => {}
-                }
-            }
-            KeyCode::Char('h') => {
-                self.ui.left_panel_half = !self.ui.left_panel_half;
-                if !self.ui.left_panel_half {
-                    self.layout.left_panel_width = 42;
                 }
             }
             KeyCode::Left | KeyCode::Right => {
@@ -375,70 +373,6 @@ impl App {
         }
     }
 
-    fn handle_naming_ralph_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Enter => {
-                if !self.ui.input_buffer.is_empty() {
-                    self.ui.pending_session_name = Some(self.ui.input_buffer.clone());
-                    self.ui.input_buffer.clear();
-                    self.ui.input_mode = InputMode::EnteringRalphPrompt;
-                } else {
-                    self.ui.input_mode = InputMode::Normal;
-                    self.ui.input_buffer.clear();
-                }
-            }
-            KeyCode::Esc => {
-                self.ui.input_mode = InputMode::Normal;
-                self.ui.input_buffer.clear();
-            }
-            KeyCode::Char(c) => self.ui.input_buffer.push(c),
-            KeyCode::Backspace => {
-                self.ui.input_buffer.pop();
-            }
-            _ => {}
-        }
-    }
-
-    fn handle_ralph_prompt_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Enter => {
-                if self.ui.input_buffer.is_empty() {
-                    self.ui.input_mode = InputMode::Normal;
-                    self.ui.pending_session_name = None;
-                    return;
-                }
-
-                let prompt = self.ui.input_buffer.clone();
-                let name = self
-                    .ui
-                    .pending_session_name
-                    .take()
-                    .unwrap_or_else(|| "Ralph".to_string());
-                self.ui.input_mode = InputMode::Normal;
-                self.ui.input_buffer.clear();
-
-                let (rows, cols) = self.panel_size_or_default();
-
-                let config = RalphConfig {
-                    prompt,
-                    max_iterations: 50,
-                    completion_promise: "COMPLETE".to_string(),
-                };
-                self.create_ralph_session(name, rows, cols, config);
-            }
-            KeyCode::Esc => {
-                self.ui.input_mode = InputMode::Normal;
-                self.ui.input_buffer.clear();
-                self.ui.pending_session_name = None;
-            }
-            KeyCode::Char(c) => self.ui.input_buffer.push(c),
-            KeyCode::Backspace => {
-                self.ui.input_buffer.pop();
-            }
-            _ => {}
-        }
-    }
-
     fn handle_naming_label_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Enter => {
@@ -600,21 +534,42 @@ impl App {
                 {
                     self.ui.focus = Focus::Sessions;
                 }
-                // Clicking on right panel: start selection and switch focus
+                // Clicking on right panel: detect double-click or start selection
                 if let Some((vt_row, vt_col)) =
                     self.screen_coords_from_mouse(event.column, event.row)
                 {
+                    let now = Instant::now();
                     let scroll_offset = self
                         .selected_session()
                         .map(|s| s.scroll_offset)
                         .unwrap_or(0);
-                    self.drag.selection = Some(Selection {
-                        anchor_row: vt_row,
-                        anchor_col: vt_col,
-                        end_row: vt_row,
-                        end_col: vt_col,
-                        scroll_offset,
-                    });
+
+                    // Double-click detection: same position within 400ms
+                    let is_double_click = self
+                        .drag
+                        .last_click
+                        .map(|(col, row, time)| {
+                            col == event.column
+                                && row == event.row
+                                && now.duration_since(time) < Duration::from_millis(400)
+                        })
+                        .unwrap_or(false);
+
+                    self.drag.last_click = Some((event.column, event.row, now));
+
+                    if is_double_click {
+                        self.drag.last_click = None; // reset so triple-click doesn't trigger
+                        self.copy_word_at(vt_row, vt_col, scroll_offset);
+                    } else {
+                        self.drag.selection = Some(Selection {
+                            anchor_row: vt_row,
+                            anchor_col: vt_col,
+                            end_row: vt_row,
+                            end_col: vt_col,
+                            scroll_offset,
+                        });
+                    }
+
                     if self.ui.left_tab == LeftTab::Sessions && self.selected_session().is_some() {
                         self.ui.focus = Focus::Terminal;
                     }
@@ -635,7 +590,6 @@ impl App {
             MouseEventKind::Drag(MouseButton::Left) => {
                 // Handle divider dragging
                 if self.drag.dragging_divider {
-                    self.ui.left_panel_half = false;
                     let total_width =
                         self.layout.last_sessions_area.width + self.layout.last_right_panel_area.width;
                     let min_width: u16 = 15;

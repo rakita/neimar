@@ -35,7 +35,7 @@ cargo install neimar
 - **Scrollback** — Scroll through session output history with keyboard or mouse
 - **Multiple CLI types** — Claude, Amp, or plain shell sessions
 - **Agents directory** — Browse and view agent definition files from a dedicated tab
-- **Ralph loop** — Automated prompt injection for iterative Claude workflows
+
 
 ## Status Indicators
 

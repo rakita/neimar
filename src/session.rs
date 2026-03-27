@@ -4,7 +4,7 @@ use crate::types::{
 use portable_pty::{Child, MasterPty, PtySize};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Instant, SystemTime};
 
 pub(crate) struct Session {
     pub(crate) id: usize,
@@ -25,10 +25,7 @@ pub(crate) struct Session {
     last_pty_output: Option<Instant>,
     pub(crate) scroll_offset: usize,
     pub(crate) turn_count: u32,
-    #[allow(dead_code)]
-    pub(crate) ralph_loop: bool,
-    pending_ralph_command: Option<String>,
-    ralph_created_at: Option<Instant>,
+
     pub(crate) permission_mode: PermissionMode,
     transcript_mtime: Option<SystemTime>,
 }
@@ -47,7 +44,6 @@ impl Session {
         child: Option<Box<dyn Child + Send>>,
         last_size: (u16, u16),
         status_file: PathBuf,
-        is_ralph: bool,
     ) -> Self {
         let has_pty = pty_writer.is_some();
         Self {
@@ -67,9 +63,6 @@ impl Session {
             last_pty_output: if has_pty { Some(Instant::now()) } else { None },
             scroll_offset: 0,
             turn_count: 0,
-            ralph_loop: is_ralph,
-            pending_ralph_command: None,
-            ralph_created_at: None,
             permission_mode: PermissionMode::Unknown,
             transcript_mtime: None,
         }
@@ -83,7 +76,6 @@ impl Session {
         parser: vt100::Parser,
         last_size: (u16, u16),
         status_file: PathBuf,
-        is_ralph: bool,
     ) -> Self {
         Self::new(
             id,
@@ -96,7 +88,6 @@ impl Session {
             None,
             last_size,
             status_file,
-            is_ralph,
         )
     }
 
@@ -112,7 +103,6 @@ impl Session {
     pub(crate) fn mark_exited(&mut self) {
         self.status = SessionStatus::Completed;
         self.pty_writer = None;
-        self.pending_ralph_command = None;
     }
 
     /// Write raw bytes to the PTY.
@@ -312,47 +302,6 @@ impl Session {
         }
     }
 
-    // ── Ralph command injection ──────────────────────────
-
-    /// Set pending ralph command to inject after prompt appears.
-    pub(crate) fn set_pending_ralph(&mut self, command: String) {
-        self.pending_ralph_command = Some(command);
-        self.ralph_created_at = Some(Instant::now());
-    }
-
-    /// Try to inject the pending ralph command if the prompt is ready.
-    pub(crate) fn try_inject_ralph_command(&mut self, min_wait: Duration, max_wait: Duration) {
-        let Some(ref cmd) = self.pending_ralph_command else {
-            return;
-        };
-        if self.status != SessionStatus::Running {
-            self.pending_ralph_command = None;
-            return;
-        }
-        let Some(created) = self.ralph_created_at else {
-            return;
-        };
-        let elapsed = created.elapsed();
-        if elapsed < min_wait {
-            return;
-        }
-
-        // Check if Claude's REPL prompt is visible (last non-empty line ends with '>')
-        let screen = self.parser.screen();
-        let contents = screen.contents();
-        let prompt_ready = contents
-            .lines()
-            .rev()
-            .find(|line| !line.trim().is_empty())
-            .is_some_and(|line| line.trim_end().ends_with('>'));
-
-        if prompt_ready || elapsed >= max_wait {
-            let cmd_bytes = format!("{}\r", cmd);
-            self.write_to_pty(cmd_bytes.as_bytes());
-            self.pending_ralph_command = None;
-        }
-    }
-
     // ── Selection text ───────────────────────────────────
 
     /// Read selected text from the terminal screen.
@@ -374,5 +323,55 @@ impl Session {
         );
         self.parser.screen_mut().set_scrollback(0);
         text.trim_end().to_string()
+    }
+
+    /// Read the word at the given screen position. Returns (word, start_col, end_col) or None.
+    pub(crate) fn read_word_at(
+        &mut self,
+        vt_row: u16,
+        vt_col: u16,
+        scroll_offset: usize,
+    ) -> Option<(String, u16, u16)> {
+        self.parser.screen_mut().set_scrollback(scroll_offset);
+        let screen = self.parser.screen();
+        let cols = screen.size().1;
+
+        let mut row_chars: Vec<char> = Vec::new();
+        for col in 0..cols {
+            let cell = screen.cell(vt_row, col);
+            if let Some(cell) = cell {
+                let ch: char = cell.contents().chars().next().unwrap_or(' ');
+                row_chars.push(ch);
+            } else {
+                row_chars.push(' ');
+            }
+        }
+        self.parser.screen_mut().set_scrollback(0);
+
+        let col = vt_col as usize;
+        if col >= row_chars.len() {
+            return None;
+        }
+
+        let is_word_char = |c: char| -> bool { !c.is_whitespace() && !c.is_ascii_punctuation() };
+        if !is_word_char(row_chars[col]) {
+            return None;
+        }
+
+        let mut start = col;
+        while start > 0 && is_word_char(row_chars[start - 1]) {
+            start -= 1;
+        }
+        let mut end = col;
+        while end + 1 < row_chars.len() && is_word_char(row_chars[end + 1]) {
+            end += 1;
+        }
+
+        let word: String = row_chars[start..=end].iter().collect();
+        let word = word.trim().to_string();
+        if word.is_empty() {
+            return None;
+        }
+        Some((word, start as u16, end as u16))
     }
 }

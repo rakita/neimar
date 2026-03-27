@@ -1,6 +1,6 @@
 use crate::session::Session;
 use crate::types::{
-    AgentFile, AppEvent, CliType, DragState, Focus, InputMode, LayoutCache, LeftTab, RalphConfig,
+    AgentFile, AppEvent, CliType, DragState, Focus, InputMode, LayoutCache, LeftTab, Selection,
     SessionStatus, SidebarItem, STATUS_POLL_INTERVAL, UiState,
 };
 use portable_pty::{CommandBuilder, PtySize, native_pty_system};
@@ -8,11 +8,8 @@ use ratatui::layout::Rect;
 use ratatui::widgets::ListState;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio::sync::mpsc;
-
-const RALPH_MIN_WAIT: Duration = Duration::from_secs(3);
-const RALPH_MAX_WAIT: Duration = Duration::from_secs(10);
 
 // ── App ─────────────────────────────────────────────────
 
@@ -68,9 +65,7 @@ impl App {
                 input_buffer: String::new(),
                 left_tab: LeftTab::Sessions,
                 selected_cli_type: CliType::Claude,
-                pending_session_name: None,
                 copied_at: None,
-                left_panel_half: false,
             },
             layout: LayoutCache {
                 left_panel_width: 42,
@@ -85,6 +80,7 @@ impl App {
                 dragging_scrollbar: false,
                 dragging_sessions_scrollbar: false,
                 dragging_session: None,
+                last_click: None,
             },
             event_tx,
             should_quit: false,
@@ -176,39 +172,6 @@ impl App {
         cli_type: CliType,
         rows: u16,
         cols: u16,
-    ) {
-        self.create_session_inner(name, cli_type, rows, cols, false);
-    }
-
-    pub(crate) fn create_ralph_session(
-        &mut self,
-        name: String,
-        rows: u16,
-        cols: u16,
-        config: RalphConfig,
-    ) {
-        self.create_session_inner(name, CliType::Claude, rows, cols, true);
-
-        // Build the ralph command to inject later
-        let escaped_prompt = config.prompt.replace('"', "\"\"").replace('\n', " ");
-        let ralph_cmd = format!(
-            "/ralph-loop {} --max-iterations {} --completion-promise \"{}\"",
-            escaped_prompt, config.max_iterations, config.completion_promise
-        );
-
-        // Store pending command on the just-created session
-        if let Some(session) = self.sessions.last_mut() {
-            session.set_pending_ralph(ralph_cmd);
-        }
-    }
-
-    fn create_session_inner(
-        &mut self,
-        name: String,
-        cli_type: CliType,
-        rows: u16,
-        cols: u16,
-        is_ralph: bool,
     ) -> usize {
         let id = self.next_session_id;
         self.next_session_id += 1;
@@ -232,7 +195,6 @@ impl App {
                     parser,
                     (rows, cols),
                     PathBuf::new(),
-                    is_ralph,
                 );
                 session.process_pty_output(
                     format!("Failed to open PTY: {}\r\n", e).as_bytes(),
@@ -252,7 +214,6 @@ impl App {
             ))
         };
 
-        // Ralph sessions spawn interactive claude (no -p), regular sessions use the cli_type command
         let mut cmd = CommandBuilder::new(cli_type.command());
         for arg in cli_type.args() {
             cmd.arg(arg);
@@ -273,7 +234,6 @@ impl App {
                     parser,
                     (rows, cols),
                     status_path,
-                    is_ralph,
                 );
                 session.process_pty_output(
                     format!("Failed to spawn {}: {}\r\n", cli_type.command(), e).as_bytes(),
@@ -316,7 +276,6 @@ impl App {
             Some(child),
             (rows, cols),
             status_path,
-            is_ralph,
         );
 
         self.push_session_to_sidebar(session);
@@ -512,12 +471,6 @@ impl App {
         }
     }
 
-    pub(crate) fn check_pending_ralph_commands(&mut self) {
-        for session in &mut self.sessions {
-            session.try_inject_ralph_command(RALPH_MIN_WAIT, RALPH_MAX_WAIT);
-        }
-    }
-
     // ── Screen coords & clipboard ────────────────────────
 
     /// Convert absolute screen (column, row) to vt100 screen-space (row, col),
@@ -562,6 +515,34 @@ impl App {
 
         if let Ok(mut clipboard) = arboard::Clipboard::new()
             && clipboard.set_text(text).is_ok()
+        {
+            self.ui.copied_at = Some(Instant::now());
+        }
+    }
+
+    /// Double-click: select the word at the given screen position and copy it to clipboard.
+    pub(crate) fn copy_word_at(&mut self, vt_row: u16, vt_col: u16, scroll_offset: usize) {
+        let idx = match self.selected_real_index() {
+            Some(i) => i,
+            None => return,
+        };
+
+        let (word, start, end) = match self.sessions[idx].read_word_at(vt_row, vt_col, scroll_offset) {
+            Some(r) => r,
+            None => return,
+        };
+
+        // Set selection to highlight the word
+        self.drag.selection = Some(Selection {
+            anchor_row: vt_row,
+            anchor_col: start,
+            end_row: vt_row,
+            end_col: end,
+            scroll_offset,
+        });
+
+        if let Ok(mut clipboard) = arboard::Clipboard::new()
+            && clipboard.set_text(word).is_ok()
         {
             self.ui.copied_at = Some(Instant::now());
         }

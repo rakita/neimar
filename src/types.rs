@@ -169,8 +169,7 @@ pub(crate) enum InputMode {
     NamingSession,
     RenamingSession,
     SelectingSessionType,
-    NamingRalph,
-    EnteringRalphPrompt,
+
     NamingLabel,
 }
 
@@ -185,12 +184,6 @@ pub(crate) enum LeftTab {
 pub(crate) struct AgentFile {
     pub(crate) name: String,
     pub(crate) content: String,
-}
-
-pub(crate) struct RalphConfig {
-    pub(crate) prompt: String,
-    pub(crate) max_iterations: usize,
-    pub(crate) completion_promise: String,
 }
 
 // ── Selection ────────────────────────────────────────────
@@ -225,9 +218,7 @@ pub(crate) struct UiState {
     pub(crate) input_buffer: String,
     pub(crate) left_tab: LeftTab,
     pub(crate) selected_cli_type: CliType,
-    pub(crate) pending_session_name: Option<String>,
     pub(crate) copied_at: Option<Instant>,
-    pub(crate) left_panel_half: bool,
 }
 
 pub(crate) struct LayoutCache {
@@ -249,6 +240,8 @@ pub(crate) struct DragState {
     pub(crate) dragging_scrollbar: bool,
     pub(crate) dragging_sessions_scrollbar: bool,
     pub(crate) dragging_session: Option<DraggingSession>,
+    /// Last left-click position and time, for double-click detection
+    pub(crate) last_click: Option<(u16, u16, Instant)>,
 }
 
 // ── Claude Status (from statusline) ──────────────────────

@@ -67,10 +67,6 @@ impl App {
         let [main_area, status_area] =
             Layout::vertical([Constraint::Fill(1), Constraint::Length(3)]).areas(frame.area());
 
-        if self.ui.left_panel_half {
-            self.layout.left_panel_width = frame.area().width / 2;
-        }
-
         let [left_area, right_area] = Layout::horizontal([
             Constraint::Length(self.layout.left_panel_width),
             Constraint::Fill(1),
@@ -487,22 +483,6 @@ impl App {
                     Span::raw(&self.ui.input_buffer),
                 ]),
             ),
-            InputMode::NamingRalph => (
-                " Ralph loop name (Esc to cancel) ".to_string(),
-                Style::new().fg(PASTEL_CYAN),
-                Line::from(vec![
-                    Span::styled(" > ", Style::new().fg(PASTEL_CYAN).bold()),
-                    Span::raw(&self.ui.input_buffer),
-                ]),
-            ),
-            InputMode::EnteringRalphPrompt => (
-                " Ralph prompt (Esc to cancel) ".to_string(),
-                Style::new().fg(PASTEL_CYAN),
-                Line::from(vec![
-                    Span::styled(" > ", Style::new().fg(PASTEL_CYAN).bold()),
-                    Span::raw(&self.ui.input_buffer),
-                ]),
-            ),
             InputMode::NamingLabel => (
                 " Label name (Esc to cancel) ".to_string(),
                 Style::new().fg(PASTEL_CYAN),
@@ -560,8 +540,6 @@ impl App {
                         Span::raw(": tab  "),
                         Span::styled("n", Style::new().fg(Color::Yellow).bold()),
                         Span::raw(": new  "),
-                        Span::styled("l", Style::new().fg(Color::Yellow).bold()),
-                        Span::raw(": ralph  "),
                         Span::styled("e", Style::new().fg(Color::Yellow).bold()),
                         Span::raw(": rename  "),
                         Span::styled("g", Style::new().fg(Color::Yellow).bold()),
@@ -594,8 +572,6 @@ impl App {
             self.ui.input_mode,
             InputMode::NamingSession
                 | InputMode::RenamingSession
-                | InputMode::NamingRalph
-                | InputMode::EnteringRalphPrompt
                 | InputMode::NamingLabel
         ) {
             let x = area.x + 4 + self.ui.input_buffer.len() as u16;

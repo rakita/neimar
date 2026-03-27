@@ -39,7 +39,6 @@ fn process_frame(
     }
     if !app.should_quit {
         app.poll_status_files();
-        app.check_pending_ralph_commands();
         terminal.draw(|frame| app.render(frame))?;
     }
     Ok(())
