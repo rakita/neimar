@@ -37,7 +37,6 @@ fn key_to_bytes(key: &KeyEvent) -> Vec<u8> {
         }
         KeyCode::Enter => vec![b'\r'],
         KeyCode::Tab => vec![b'\t'],
-        KeyCode::BackTab => b"\x1b[Z".to_vec(),
         KeyCode::Backspace => vec![0x7f],
         KeyCode::Esc => vec![0x1b],
         KeyCode::Up => b"\x1b[A".to_vec(),
@@ -88,21 +87,6 @@ impl App {
                 return;
             }
             InputMode::Normal => {}
-        }
-
-        // BackTab (Shift+Tab): switch to previous session
-        if key.code == KeyCode::BackTab {
-            let count = self.sidebar_items.len();
-            if let Some(sel) = self.list_state.selected() {
-                if sel > 0 {
-                    self.list_state.select(Some(sel - 1));
-                } else if count > 0 {
-                    self.list_state.select(Some(count - 1));
-                }
-            }
-            self.ui.focus = Focus::Terminal;
-            self.ui.left_tab = LeftTab::Sessions;
-            return;
         }
 
         // Shift+Arrow/Page keys work regardless of current panel
