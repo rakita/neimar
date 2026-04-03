@@ -20,13 +20,16 @@ fn key_to_bytes(key: &KeyEvent) -> Vec<u8> {
         return vec![];
     }
 
-    if key.modifiers.contains(KeyModifiers::ALT)
-        && let KeyCode::Char(c) = key.code
-    {
-        let mut bytes = vec![0x1b];
-        let mut buf = [0u8; 4];
-        bytes.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
-        return bytes;
+    if key.modifiers.contains(KeyModifiers::ALT) {
+        if let KeyCode::Char(c) = key.code {
+            let mut bytes = vec![0x1b];
+            let mut buf = [0u8; 4];
+            bytes.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+            return bytes;
+        }
+        if key.code == KeyCode::Backspace {
+            return vec![0x1b, 0x7f];
+        }
     }
 
     match key.code {
