@@ -362,7 +362,14 @@ impl App {
         let Some(sel) = self.list_state.selected() else {
             return;
         };
+        if self.sidebar_items.len() < 2 {
+            return;
+        }
         if sel == 0 {
+            // Wrap: move item from top to bottom
+            let item = self.sidebar_items.remove(0);
+            self.sidebar_items.push(item);
+            self.list_state.select(Some(self.sidebar_items.len() - 1));
             return;
         }
         match &self.sidebar_items[sel] {
@@ -387,7 +394,14 @@ impl App {
         let Some(sel) = self.list_state.selected() else {
             return;
         };
+        if self.sidebar_items.len() < 2 {
+            return;
+        }
         if sel >= self.sidebar_items.len() - 1 {
+            // Wrap: move item from bottom to top
+            let item = self.sidebar_items.remove(sel);
+            self.sidebar_items.insert(0, item);
+            self.list_state.select(Some(0));
             return;
         }
         match &self.sidebar_items[sel] {
