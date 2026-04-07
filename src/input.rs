@@ -5,7 +5,21 @@ use crate::types::{
     SESSION_ITEM_HEIGHT,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use rand::RngExt;
 use std::time::{Duration, Instant};
+
+const DEFAULT_SESSION_NAMES: &[&str] = &[
+    "turbo snail", "angry pickle", "cosmic potato", "dizzy llama", "funky moose",
+    "grumpy waffle", "hyper sloth", "jazzy ferret", "karma yeti", "lazy rocket",
+    "mighty noodle", "ninja turnip", "odd penguin", "plucky badger", "quirky otter",
+    "rowdy puffin", "sneaky wombat", "tiny kraken", "ultra gremlin", "verbose clam",
+    "wobbly cactus", "zippy narwhal", "bold pretzel", "crispy goblin", "dapper goose",
+    "epic walrus", "fluffy gator", "groovy squid", "humble yak", "itchy parrot",
+    "jolly muffin", "keen hamster", "lunar raccoon", "mellow panda", "noisy quokka",
+    "peppy wizard", "quiet thunder", "rusty unicorn", "salty pigeon", "toasty cobra",
+    "upbeat lemur", "vivid gecko", "witty falcon", "xenial donkey", "yappy coyote",
+    "zesty beaver", "snazzy moth", "rapid turtle", "bouncy morel", "chief nugget",
+];
 
 // ── Key to terminal bytes ───────────────────────────────
 
@@ -253,17 +267,17 @@ impl App {
     fn handle_naming_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Enter => {
-                if !self.ui.input_buffer.is_empty() {
-                    let name = self.ui.input_buffer.clone();
-                    let cli_type = self.ui.selected_cli_type;
-                    self.ui.input_mode = InputMode::Normal;
-                    self.ui.input_buffer.clear();
-                    let (rows, cols) = self.panel_size_or_default();
-                    self.create_session(name, cli_type, rows, cols);
+                let name = if self.ui.input_buffer.is_empty() {
+                    let idx = rand::rng().random_range(0..DEFAULT_SESSION_NAMES.len());
+                    DEFAULT_SESSION_NAMES[idx].to_string()
                 } else {
-                    self.ui.input_mode = InputMode::Normal;
-                    self.ui.input_buffer.clear();
-                }
+                    self.ui.input_buffer.clone()
+                };
+                let cli_type = self.ui.selected_cli_type;
+                self.ui.input_mode = InputMode::Normal;
+                self.ui.input_buffer.clear();
+                let (rows, cols) = self.panel_size_or_default();
+                self.create_session(name, cli_type, rows, cols);
             }
             KeyCode::Esc => {
                 self.ui.input_mode = InputMode::Normal;
