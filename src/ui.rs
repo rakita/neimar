@@ -370,11 +370,17 @@ impl App {
         self.layout.last_right_panel_inner = inner;
         frame.render_widget(block, area);
 
+        // Reserve 1 column on the right for the scrollbar so PTY text isn't clipped
+        let pty_area = Rect {
+            width: inner.width.saturating_sub(1),
+            ..inner
+        };
+
         // Resize ALL sessions when panel size changes (not just the visible one)
-        let new_size = (inner.height, inner.width);
-        if new_size != self.layout.last_right_panel_size && inner.width > 0 && inner.height > 0 {
+        let new_size = (pty_area.height, pty_area.width);
+        if new_size != self.layout.last_right_panel_size && pty_area.width > 0 && pty_area.height > 0 {
             self.layout.last_right_panel_size = new_size;
-            self.resize_all_sessions(inner.height, inner.width);
+            self.resize_all_sessions(pty_area.height, pty_area.width);
         }
 
         // Apply scrollback offset before rendering
@@ -384,7 +390,7 @@ impl App {
         if scroll_offset > 0 {
             pseudo_term = pseudo_term.cursor(tui_term::widget::Cursor::default().visibility(false));
         }
-        frame.render_widget(pseudo_term, inner);
+        frame.render_widget(pseudo_term, pty_area);
 
         // Reset scrollback so parser operates normally
         self.sessions[idx].set_scrollback(0);
