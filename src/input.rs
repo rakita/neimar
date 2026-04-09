@@ -704,8 +704,13 @@ impl App {
                     if self.ui.left_tab == LeftTab::Agents {
                         self.agent_scroll_offset = self.agent_scroll_offset.saturating_add(1);
                     } else if let Some(session) = self.selected_session_mut() {
-                        session.scroll_offset += 1;
-                        session.clamp_scroll();
+                        if session.screen().alternate_screen() {
+                            // Pager/editor running — forward as Up arrow
+                            session.write_to_pty(b"\x1b[A");
+                        } else {
+                            session.scroll_offset += 1;
+                            session.clamp_scroll();
+                        }
                     }
                 }
             }
@@ -734,7 +739,12 @@ impl App {
                     if self.ui.left_tab == LeftTab::Agents {
                         self.agent_scroll_offset = self.agent_scroll_offset.saturating_sub(1);
                     } else if let Some(session) = self.selected_session_mut() {
-                        session.scroll_offset = session.scroll_offset.saturating_sub(1);
+                        if session.screen().alternate_screen() {
+                            // Pager/editor running — forward as Down arrow
+                            session.write_to_pty(b"\x1b[B");
+                        } else {
+                            session.scroll_offset = session.scroll_offset.saturating_sub(1);
+                        }
                     }
                 }
             }
