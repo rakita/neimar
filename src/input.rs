@@ -150,12 +150,19 @@ impl App {
                     }
                     return;
                 }
-                KeyCode::Char('N') => {
+                _ => {}
+            }
+        }
+
+        // Ctrl+key commands work regardless of current panel
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            match key.code {
+                KeyCode::Char('n') => {
                     self.ui.input_mode = InputMode::SelectingSessionType;
                     self.ui.selected_cli_type = CliType::Claude;
                     return;
                 }
-                KeyCode::Char('E') => {
+                KeyCode::Char('e') => {
                     match self.selected_sidebar_item().cloned() {
                         Some(SidebarItem::Session(_)) => {
                             if let Some(real_idx) = self.selected_real_index() {
@@ -173,12 +180,12 @@ impl App {
                     }
                     return;
                 }
-                KeyCode::Char('G') => {
+                KeyCode::Char('g') => {
                     self.ui.input_mode = InputMode::NamingLabel;
                     self.ui.input_buffer.clear();
                     return;
                 }
-                KeyCode::Char('R') => {
+                KeyCode::Char('r') => {
                     self.remove_selected_sidebar_item();
                     return;
                 }

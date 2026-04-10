@@ -555,7 +555,7 @@ impl App {
                         Span::styled("q", Style::new().fg(Color::Yellow).bold()),
                         Span::raw(": quit  "),
                         Span::styled(
-                            "(⇧ works from terminal)",
+                            "⌃",
                             Style::new().fg(Color::DarkGray),
                         ),
                     ])
