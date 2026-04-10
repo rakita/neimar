@@ -54,6 +54,7 @@ fn key_to_bytes(key: &KeyEvent) -> Vec<u8> {
         }
         KeyCode::Enter => vec![b'\r'],
         KeyCode::Tab => vec![b'\t'],
+        KeyCode::BackTab => b"\x1b[Z".to_vec(),
         KeyCode::Backspace => vec![0x7f],
         KeyCode::Esc => vec![0x1b],
         KeyCode::Up => b"\x1b[A".to_vec(),
@@ -147,6 +148,11 @@ impl App {
                             .scroll_offset
                             .saturating_sub(panel_height.saturating_sub(1).max(1));
                     }
+                    return;
+                }
+                KeyCode::Char('N') => {
+                    self.ui.input_mode = InputMode::SelectingSessionType;
+                    self.ui.selected_cli_type = CliType::Claude;
                     return;
                 }
                 _ => {}
