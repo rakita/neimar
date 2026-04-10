@@ -538,10 +538,10 @@ impl App {
                 } else {
                     Line::from(vec![
                         Span::styled(
-                            " Shift(⇧)+Left(←)/Right(→)",
+                            " ⇧+←/→",
                             Style::new().fg(Color::Yellow).bold(),
                         ),
-                        Span::raw(": switch panel  "),
+                        Span::raw(": panel  "),
                         Span::styled("←/→", Style::new().fg(Color::Yellow).bold()),
                         Span::raw(": tab  "),
                         Span::styled("n", Style::new().fg(Color::Yellow).bold()),
@@ -552,10 +552,12 @@ impl App {
                         Span::raw(": label  "),
                         Span::styled("r", Style::new().fg(Color::Yellow).bold()),
                         Span::raw(": remove  "),
-                        Span::styled("h", Style::new().fg(Color::Yellow).bold()),
-                        Span::raw(": half  "),
                         Span::styled("q", Style::new().fg(Color::Yellow).bold()),
-                        Span::raw(": quit"),
+                        Span::raw(": quit  "),
+                        Span::styled(
+                            "(⇧ works from terminal)",
+                            Style::new().fg(Color::DarkGray),
+                        ),
                     ])
                 };
                 (

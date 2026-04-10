@@ -155,6 +155,33 @@ impl App {
                     self.ui.selected_cli_type = CliType::Claude;
                     return;
                 }
+                KeyCode::Char('E') => {
+                    match self.selected_sidebar_item().cloned() {
+                        Some(SidebarItem::Session(_)) => {
+                            if let Some(real_idx) = self.selected_real_index() {
+                                self.ui.input_mode = InputMode::RenamingSession;
+                                self.ui.input_buffer = self.sessions[real_idx].name.clone();
+                            }
+                        }
+                        Some(SidebarItem::Label(label_id)) => {
+                            if let Some(name) = self.labels.get(&label_id) {
+                                self.ui.input_mode = InputMode::RenamingSession;
+                                self.ui.input_buffer = name.clone();
+                            }
+                        }
+                        None => {}
+                    }
+                    return;
+                }
+                KeyCode::Char('G') => {
+                    self.ui.input_mode = InputMode::NamingLabel;
+                    self.ui.input_buffer.clear();
+                    return;
+                }
+                KeyCode::Char('R') => {
+                    self.remove_selected_sidebar_item();
+                    return;
+                }
                 _ => {}
             }
         }
