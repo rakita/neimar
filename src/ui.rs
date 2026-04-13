@@ -533,14 +533,14 @@ impl App {
                     ))
                 } else {
                     Line::from(vec![
-                        Span::styled(
-                            " Shift(⇧)+Left(←)/Right(→)",
-                            Style::new().fg(Color::Yellow).bold(),
-                        ),
-                        Span::raw(": switch panel  "),
+                        Span::raw(" Shift("),
+                        Span::styled("⇧", Style::new().fg(Color::Yellow).bold()),
+                        Span::raw(") + "),
+                        Span::styled("←/→", Style::new().fg(Color::Yellow).bold()),
+                        Span::raw(": panel switch  "),
                         Span::styled("←/→", Style::new().fg(Color::Yellow).bold()),
                         Span::raw(": tab  "),
-                        Span::styled("Ctrl(⌃)+n", Style::new().fg(Color::Yellow).bold()),
+                        Span::styled("n", Style::new().fg(Color::Yellow).bold()),
                         Span::raw(": new  "),
                         Span::styled("e", Style::new().fg(Color::Yellow).bold()),
                         Span::raw(": rename  "),
@@ -548,8 +548,9 @@ impl App {
                         Span::raw(": label  "),
                         Span::styled("r", Style::new().fg(Color::Yellow).bold()),
                         Span::raw(": remove  "),
-                        Span::styled("Ctrl(⌃)+q", Style::new().fg(Color::Yellow).bold()),
-                        Span::raw(": quit"),
+                        Span::styled("q", Style::new().fg(Color::Yellow).bold()),
+                        Span::raw(": quit  "),
+                        Span::styled("Control(⌃) + n : global new", Style::new().fg(Color::DarkGray)),
                     ])
                 };
                 (
