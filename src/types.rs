@@ -77,7 +77,6 @@ pub(crate) enum SessionState {
     Input,
     Planned,
     Done,
-    Starting,
     Closed,
     Failed,
 }
@@ -89,7 +88,6 @@ impl SessionState {
             SessionState::Input => "💬",
             SessionState::Planned => "📋",
             SessionState::Done => "🟢",
-            SessionState::Starting => "⏳",
             SessionState::Closed => "🔒",
             SessionState::Failed => "🔴",
         }
@@ -102,7 +100,6 @@ impl SessionState {
             SessionState::Input => Color::Cyan,
             SessionState::Planned => Color::Magenta,
             SessionState::Done => Color::Green,
-            SessionState::Starting => Color::DarkGray,
             SessionState::Closed => Color::DarkGray,
             SessionState::Failed => Color::Red,
         }
@@ -114,7 +111,6 @@ impl SessionState {
             SessionState::Input => "INPUT",
             SessionState::Planned => "PLANNED",
             SessionState::Done => "DONE",
-            SessionState::Starting => "STARTING",
             SessionState::Closed => "CLOSED",
             SessionState::Failed => "FAILED",
         }

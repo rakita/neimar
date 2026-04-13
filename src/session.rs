@@ -213,8 +213,6 @@ impl Session {
             SessionStatus::Running => {
                 if self.is_actively_working() {
                     SessionState::Working
-                } else if self.last_pty_output.is_none() {
-                    SessionState::Starting
                 } else if self.cli_type != CliType::Console && self.is_showing_plan_prompt() {
                     SessionState::Planned
                 } else if self.cli_type != CliType::Console && self.is_waiting_for_input() {

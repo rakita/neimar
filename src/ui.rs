@@ -1,5 +1,5 @@
 use crate::app::App;
-use crate::types::{CliType, Focus, InputMode, LeftTab, SessionState, SidebarItem};
+use crate::types::{CliType, Focus, InputMode, LeftTab, SidebarItem};
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Position, Rect},
@@ -153,11 +153,7 @@ impl App {
                     let left_prefix_width = if mode_emoji.is_empty() { 0 } else { display_width(mode_emoji) + 1 };
                     let display_name: String = format!("{} {}", s.cli_type.emoji(), s.name);
 
-                    let ai_label = if !matches!(state, SessionState::Starting) {
-                        Some(format!("{} {}", state_emoji, state.text_label()))
-                    } else {
-                        None
-                    };
+                    let ai_label = Some(format!("{} {}", state_emoji, state.text_label()));
                     let ai_color = state.color();
                     let metadata_text = {
                         let mode_label = s.permission_mode.label();
@@ -538,13 +534,13 @@ impl App {
                 } else {
                     Line::from(vec![
                         Span::styled(
-                            " ⇧+←/→",
+                            " Shift(⇧)+Left(←)/Right(→)",
                             Style::new().fg(Color::Yellow).bold(),
                         ),
-                        Span::raw(": panel  "),
+                        Span::raw(": switch panel  "),
                         Span::styled("←/→", Style::new().fg(Color::Yellow).bold()),
                         Span::raw(": tab  "),
-                        Span::styled("n", Style::new().fg(Color::Yellow).bold()),
+                        Span::styled("Ctrl(⌃)+n", Style::new().fg(Color::Yellow).bold()),
                         Span::raw(": new  "),
                         Span::styled("e", Style::new().fg(Color::Yellow).bold()),
                         Span::raw(": rename  "),
@@ -552,12 +548,8 @@ impl App {
                         Span::raw(": label  "),
                         Span::styled("r", Style::new().fg(Color::Yellow).bold()),
                         Span::raw(": remove  "),
-                        Span::styled("q", Style::new().fg(Color::Yellow).bold()),
-                        Span::raw(": quit  "),
-                        Span::styled(
-                            "⌃",
-                            Style::new().fg(Color::DarkGray),
-                        ),
+                        Span::styled("Ctrl(⌃)+q", Style::new().fg(Color::Yellow).bold()),
+                        Span::raw(": quit"),
                     ])
                 };
                 (

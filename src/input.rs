@@ -162,31 +162,8 @@ impl App {
                     self.ui.selected_cli_type = CliType::Claude;
                     return;
                 }
-                KeyCode::Char('e') => {
-                    match self.selected_sidebar_item().cloned() {
-                        Some(SidebarItem::Session(_)) => {
-                            if let Some(real_idx) = self.selected_real_index() {
-                                self.ui.input_mode = InputMode::RenamingSession;
-                                self.ui.input_buffer = self.sessions[real_idx].name.clone();
-                            }
-                        }
-                        Some(SidebarItem::Label(label_id)) => {
-                            if let Some(name) = self.labels.get(&label_id) {
-                                self.ui.input_mode = InputMode::RenamingSession;
-                                self.ui.input_buffer = name.clone();
-                            }
-                        }
-                        None => {}
-                    }
-                    return;
-                }
-                KeyCode::Char('g') => {
-                    self.ui.input_mode = InputMode::NamingLabel;
-                    self.ui.input_buffer.clear();
-                    return;
-                }
-                KeyCode::Char('r') => {
-                    self.remove_selected_sidebar_item();
+                KeyCode::Char('q') => {
+                    self.should_quit = true;
                     return;
                 }
                 _ => {}
@@ -205,11 +182,6 @@ impl App {
 
     fn handle_sessions_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Char('q') => self.should_quit = true,
-            KeyCode::Char('n') => {
-                self.ui.input_mode = InputMode::SelectingSessionType;
-                self.ui.selected_cli_type = CliType::Claude;
-            }
             KeyCode::Char('g') => {
                 self.ui.input_mode = InputMode::NamingLabel;
                 self.ui.input_buffer.clear();
@@ -268,14 +240,8 @@ impl App {
 
     fn handle_agents_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Left | KeyCode::Right => {
                 self.ui.left_tab = LeftTab::Sessions;
-            }
-            KeyCode::Char('n') => {
-                self.ui.left_tab = LeftTab::Sessions;
-                self.ui.input_mode = InputMode::SelectingSessionType;
-                self.ui.selected_cli_type = CliType::Claude;
             }
             KeyCode::Up => {
                 if let Some(sel) = self.agent_list_state.selected() {
