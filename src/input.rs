@@ -162,14 +162,9 @@ impl App {
                     self.ui.selected_cli_type = CliType::Claude;
                     return;
                 }
-                KeyCode::Char('q') => {
-                    self.should_quit = true;
-                    return;
-                }
                 _ => {}
             }
         }
-
 
         match self.ui.focus {
             Focus::Sessions => match self.ui.left_tab {
@@ -182,6 +177,11 @@ impl App {
 
     fn handle_sessions_key(&mut self, key: KeyEvent) {
         match key.code {
+            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Char('n') => {
+                self.ui.input_mode = InputMode::SelectingSessionType;
+                self.ui.selected_cli_type = CliType::Claude;
+            }
             KeyCode::Char('g') => {
                 self.ui.input_mode = InputMode::NamingLabel;
                 self.ui.input_buffer.clear();
