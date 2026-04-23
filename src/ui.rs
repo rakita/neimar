@@ -50,10 +50,8 @@ fn is_wide_emoji(c: char) -> bool {
         | '\u{2049}' // ⁉
         | '\u{1F916}' // 🤖 (Claude CLI type)
         | '\u{1F5A5}' // 🖥 (Console CLI type, base char)
-        | '\u{1F9F1}' // 🧱 (Working state)
         | '\u{1F4AC}' // 💬 (Input state)
         | '\u{1F4CB}' // 📋 (Planned state)
-        | '\u{1F7E2}' // 🟢 (Done state)
         | '\u{1F512}' // 🔒 (Closed state)
         | '\u{1F4A5}' // 💥 (Dangerous mode)
         | '\u{1F534}' // 🔴 (Failed state)
