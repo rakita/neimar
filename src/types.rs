@@ -84,10 +84,10 @@ pub(crate) enum SessionState {
 impl SessionState {
     pub(crate) fn label(&self) -> &'static str {
         match self {
-            SessionState::Working => "WORKING",
+            SessionState::Working => "🧱",
             SessionState::Input => "💬",
             SessionState::Planned => "📋",
-            SessionState::Done => "DONE",
+            SessionState::Done => "🟢",
             SessionState::Closed => "🔒",
             SessionState::Failed => "🔴",
         }
