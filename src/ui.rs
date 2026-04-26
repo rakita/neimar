@@ -2,12 +2,12 @@ use crate::app::App;
 use crate::types::{CliType, Focus, InputMode, LeftTab, SidebarItem};
 use ratatui::{
     Frame,
-    layout::{Constraint, Layout, Position, Rect},
+    layout::{Alignment, Constraint, Layout, Position, Rect},
     style::{Color, Style},
     text::{Line, Span},
     widgets::{
-        Block, BorderType, List, ListItem, Padding, Paragraph, Scrollbar, ScrollbarOrientation,
-        ScrollbarState,
+        Block, BorderType, Clear, List, ListItem, Padding, Paragraph, Scrollbar,
+        ScrollbarOrientation, ScrollbarState,
     },
 };
 use tui_term::widget::PseudoTerminal;
@@ -80,6 +80,50 @@ impl App {
         }
         self.render_right_panel(frame, right_area);
         self.render_status(frame, status_area);
+
+        if matches!(self.ui.input_mode, InputMode::ConfirmQuit) {
+            self.render_confirm_quit_popup(frame, frame.area());
+        }
+    }
+
+    fn render_confirm_quit_popup(&self, frame: &mut Frame, area: Rect) {
+        let popup_width: u16 = 44;
+        let popup_height: u16 = 7;
+        let x = area.x + area.width.saturating_sub(popup_width) / 2;
+        let y = area.y + area.height.saturating_sub(popup_height) / 2;
+        let popup_area = Rect {
+            x,
+            y,
+            width: popup_width.min(area.width),
+            height: popup_height.min(area.height),
+        };
+
+        frame.render_widget(Clear, popup_area);
+
+        let block = Block::bordered()
+            .title(" Quit? ")
+            .border_type(BorderType::Rounded)
+            .border_style(Style::new().fg(PASTEL_CYAN));
+
+        let lines = vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "Are you sure you want to leave?",
+                Style::new().fg(Color::White).bold(),
+            ))
+            .alignment(Alignment::Center),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("y", Style::new().fg(Color::Yellow).bold()),
+                Span::raw(": yes   "),
+                Span::styled("n", Style::new().fg(Color::Yellow).bold()),
+                Span::raw(": no"),
+            ])
+            .alignment(Alignment::Center),
+        ];
+
+        let p = Paragraph::new(lines).block(block);
+        frame.render_widget(p, popup_area);
     }
 
     fn render_sessions(&mut self, frame: &mut Frame, area: Rect) {

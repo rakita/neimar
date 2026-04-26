@@ -104,6 +104,10 @@ impl App {
                 self.handle_naming_label_key(key);
                 return;
             }
+            InputMode::ConfirmQuit => {
+                self.handle_confirm_quit_key(key);
+                return;
+            }
             InputMode::Normal => {}
         }
 
@@ -177,7 +181,7 @@ impl App {
 
     fn handle_sessions_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Char('q') => self.ui.input_mode = InputMode::ConfirmQuit,
             KeyCode::Char('n') => {
                 self.ui.input_mode = InputMode::SelectingSessionType;
                 self.ui.selected_cli_type = CliType::Claude;
@@ -374,6 +378,19 @@ impl App {
                 self.ui.input_buffer.clear();
             }
             KeyCode::Esc => {
+                self.ui.input_mode = InputMode::Normal;
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_confirm_quit_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                self.ui.input_mode = InputMode::Normal;
+                self.should_quit = true;
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                 self.ui.input_mode = InputMode::Normal;
             }
             _ => {}

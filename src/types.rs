@@ -167,6 +167,7 @@ pub(crate) enum InputMode {
     SelectingSessionType,
 
     NamingLabel,
+    ConfirmQuit,
 }
 
 #[derive(PartialEq)]
