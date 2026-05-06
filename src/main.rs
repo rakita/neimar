@@ -1,4 +1,5 @@
 mod app;
+mod config;
 mod event;
 mod input;
 mod mouse;
@@ -7,8 +8,9 @@ mod types;
 mod ui;
 
 use app::App;
+use config::Config;
 use event::apply_event;
-use types::{AppEvent, CliType, Focus, MAX_PTY_EVENTS_PER_FRAME};
+use types::{AppEvent, Focus, MAX_PTY_EVENTS_PER_FRAME};
 
 use crossterm::event::{Event, KeyEventKind};
 use std::time::Duration;
@@ -110,12 +112,15 @@ async fn run(terminal: &mut ratatui::DefaultTerminal) -> std::io::Result<()> {
     } else {
         (24, 80)
     };
-    app.create_session("claude skip-perm".to_string(), CliType::ClaudeDangerous, rows, cols);
-    app.create_session("claude".to_string(), CliType::Claude, rows, cols);
-    app.create_session("console".to_string(), CliType::Console, rows, cols);
-    // Focus the first session (claude skip-perm)
-    app.list_state.select(Some(0));
-    app.ui.focus = Focus::Terminal;
+
+    let config = Config::load_or_create();
+    for sess in &config.default_sessions {
+        app.create_session(sess.name.clone(), sess.cli_type, rows, cols);
+    }
+    if !config.default_sessions.is_empty() {
+        app.list_state.select(Some(0));
+        app.ui.focus = Focus::Terminal;
+    }
     let mut render_interval = tokio::time::interval(Duration::from_millis(33));
     render_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 

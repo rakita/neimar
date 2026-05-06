@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Neimar Logo" width="300" />
+  <img src="https://raw.githubusercontent.com/rakita/neimar/main/assets/logo.png" alt="Neimar Logo" width="300" />
 </p>
 
 # Neimar
@@ -8,7 +8,7 @@ TUI multiplexer for managing multiple AI CLI sessions in a terminal. Run several
 
 The name *neimar* is a Serbian word meaning "builder" or "master builder" — fitting for a tool that helps you build things with AI.
 
-![Neimar](assets/console.png)
+![Neimar](https://raw.githubusercontent.com/rakita/neimar/main/assets/console.png)
 
 ## Install
 
@@ -125,6 +125,36 @@ When creating a new session (`Ctrl+N`), choose a type:
 | 2 | Claude (Danger) | 🤖💥 | Claude CLI with `--dangerously-skip-permissions` |
 | 3 | Amp | ⚡ | Amp CLI session |
 | 4 | Console | 🖥️ | Plain shell session |
+
+## Configuration
+
+Neimar reads a global config file from your platform's standard config directory. The file is created with sensible defaults the first time you run the app, so you can simply launch neimar once and then edit it.
+
+### Config file location
+
+| OS | Path |
+|----|------|
+| macOS | `~/Library/Application Support/neimar/config.yaml` |
+| Windows | `%APPDATA%\neimar\config.yaml` |
+| Linux | `$XDG_CONFIG_HOME/neimar/config.yaml` (defaults to `~/.config/neimar/config.yaml`) |
+
+### Default sessions
+
+The `default_sessions` list controls which sessions are opened automatically on startup, in order. Each entry has a `name` (the label shown in the sidebar) and a `type` (one of `claude`, `claude-dangerous`, `amp`, `console`).
+
+Example `config.yaml`:
+
+```yaml
+default_sessions:
+  - name: claude skip-perm
+    type: claude-dangerous
+  - name: claude
+    type: claude
+  - name: console
+    type: console
+```
+
+To start with no sessions, set `default_sessions: []`. To disable auto-startup entirely, you can omit the field. If the config file is malformed it is left untouched and the built-in defaults are used.
 
 ## License
 

@@ -1,5 +1,5 @@
 use ratatui::layout::Rect;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
 // ── Constants ────────────────────────────────────────────
@@ -18,7 +18,8 @@ pub(crate) enum AppEvent {
 
 // ── CLI Type ─────────────────────────────────────────────
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub(crate) enum CliType {
     Claude,
     ClaudeDangerous,
